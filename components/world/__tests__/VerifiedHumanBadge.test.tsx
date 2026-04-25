@@ -13,10 +13,10 @@ describe('VerifiedHumanBadge', () => {
       expect(screen.getByText('badge.verified_human')).toBeInTheDocument();
     });
 
-    it('does not set aria-label on the wrapper', () => {
+    it('has aria-label for screen readers', () => {
       const { container } = render(<VerifiedHumanBadge />);
       const wrapper = container.firstChild as HTMLElement;
-      expect(wrapper).not.toHaveAttribute('aria-label');
+      expect(wrapper).toHaveAttribute('aria-label', 'World ID Verified Human');
     });
 
     it('matches snapshot', () => {

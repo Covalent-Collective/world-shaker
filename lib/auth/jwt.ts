@@ -32,9 +32,9 @@ export interface WorldShakerClaims {
   nullifier: string;
   /**
    * User's preferred language, derived from Accept-Language header at verify
-   * time. Missing claim means caller should default to 'ko'.
+   * time. Always populated — defaults to 'ko' when claim is absent.
    */
-  language_pref?: 'ko' | 'en';
+  language_pref: 'ko' | 'en';
 }
 
 /**
@@ -79,14 +79,13 @@ export async function verifyWorldUserJwt(token: string): Promise<WorldShakerClai
   if (typeof payload.world_user_id !== 'string' || typeof payload.nullifier !== 'string') {
     throw new Error('jwt_missing_claims');
   }
+  const lang: 'ko' | 'en' =
+    payload.language_pref === 'ko' || payload.language_pref === 'en' ? payload.language_pref : 'ko';
   const claims: WorldShakerClaims = {
     world_user_id: payload.world_user_id,
     nullifier: payload.nullifier,
+    language_pref: lang,
   };
-  // language_pref is optional; missing claim → caller defaults to 'ko'
-  if (payload.language_pref === 'ko' || payload.language_pref === 'en') {
-    claims.language_pref = payload.language_pref;
-  }
   return claims;
 }
 

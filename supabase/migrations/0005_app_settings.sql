@@ -81,3 +81,25 @@ alter table public.rate_limit_buckets  enable row level security;
 insert into public.app_settings (id, posthog_cohort_salt)
 values (1, encode(gen_random_bytes(32), 'hex'))
 on conflict (id) do nothing;
+
+-- ---------- rate_limit_increment RPC ------------------------------------
+-- Atomic INSERT...ON CONFLICT DO UPDATE for fixed-window rate limiting.
+-- Returns the new count after increment.
+create or replace function public.rate_limit_increment(
+  p_world_user_id uuid,
+  p_bucket_key text,
+  p_window_start timestamptz
+) returns int
+language sql
+security definer
+set search_path = public
+as $$
+  insert into public.rate_limit_buckets (world_user_id, bucket_key, window_start, count)
+  values (p_world_user_id, p_bucket_key, p_window_start, 1)
+  on conflict (world_user_id, bucket_key, window_start)
+  do update set count = public.rate_limit_buckets.count + 1
+  returning count;
+$$;
+
+revoke execute on function public.rate_limit_increment(uuid, text, timestamptz) from public, anon, authenticated;
+grant execute on function public.rate_limit_increment(uuid, text, timestamptz) to service_role;

@@ -157,22 +157,24 @@ begin
         and c.status = 'active'
         and c.embedding is not null
         and target_a.embedding is not null
+        -- stroll_proactive: exclude self, inactive, accepted/mutual either direction,
+        -- AND outgoing pending; admit incoming pending ONLY when
+        -- origin='user_initiated_proactive'.
+        --
+        -- Asymmetry rationale: a user-initiated proactive match (origin=
+        -- 'user_initiated_proactive') coming IN means another user already chose
+        -- this candidate — surfacing them again is desirable so target_user can
+        -- accept. By contrast, system-generated incoming pending rows represent
+        -- background algorithmic queuing; re-surfacing those would duplicate the
+        -- system pipeline, so they are excluded via the origin filter.
         and not exists (
-          select 1
-            from public.matches m
-           where (
-                  (m.user_id = target_user and m.candidate_user_id = c.user_id)
-               or (m.user_id = c.user_id and m.candidate_user_id = target_user)
-             )
-             and m.status in ('accepted', 'mutual')
-        )
-        -- Exclude OUTGOING pending (target -> candidate already pending).
-        and not exists (
-          select 1
-            from public.matches m
-           where m.user_id = target_user
-             and m.candidate_user_id = c.user_id
-             and m.status = 'pending'
+          select 1 from public.matches m
+          where (
+            (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status in ('accepted','mutual'))
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status in ('accepted','mutual'))
+            or (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status = 'pending')
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status = 'pending' and m.origin <> 'user_initiated_proactive')
+          )
         )
       order by score desc
       limit k;

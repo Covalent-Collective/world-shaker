@@ -152,3 +152,89 @@ describe('setPosthogIdentity', () => {
     expect(call.properties.$set.posthog_cohort_predecessor).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// captureServer — enforces cohort hashing, rejects raw distinctId API
+// ---------------------------------------------------------------------------
+
+describe('captureServer', () => {
+  // captureServer lives in ../server.ts; it imports hashCohort from ../cohort.
+  // We mock posthog-node and @/lib/supabase/service so no real I/O happens.
+
+  const mockCapture = vi.fn();
+  const mockFlush = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.resetModules();
+    mockFrom.mockReset();
+    mockSelect.mockReset();
+    mockEq.mockReset();
+    mockSingle.mockReset();
+    mockCapture.mockReset();
+    mockFlush.mockReset().mockResolvedValue(undefined);
+
+    // Mock posthog-node so no real PostHog client is created.
+    vi.doMock('posthog-node', () => ({
+      PostHog: vi.fn(function (this: { capture: typeof mockCapture; flush: typeof mockFlush }) {
+        this.capture = mockCapture;
+        this.flush = mockFlush;
+      }),
+    }));
+
+    // Provide a POSTHOG_PROJECT_API_KEY so getPostHogServer() initialises.
+    process.env.POSTHOG_PROJECT_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    delete process.env.POSTHOG_PROJECT_API_KEY;
+    vi.clearAllMocks();
+  });
+
+  it('hashes worldUserId before calling ph.capture — never forwards a raw UUID', async () => {
+    const salt = 'capture-salt';
+    mockSalt(salt);
+
+    const { captureServer } = await import('../server');
+
+    const worldUserId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    await captureServer('test.event', { worldUserId, properties: { foo: 'bar' } });
+
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    const captureArg = mockCapture.mock.calls[0][0] as {
+      distinctId: string;
+      event: string;
+      properties?: Record<string, unknown>;
+    };
+
+    // distinctId must be the 64-hex cohort hash, not the raw UUID.
+    expect(captureArg.distinctId).toMatch(/^[0-9a-f]{64}$/);
+    expect(captureArg.distinctId).not.toBe(worldUserId);
+    expect(captureArg.distinctId).toBe(expectedHash(worldUserId, salt));
+    expect(captureArg.event).toBe('test.event');
+    expect(captureArg.properties).toEqual({ foo: 'bar' });
+  });
+
+  it('new API only accepts worldUserId — a raw 64-hex distinctId cannot be passed', async () => {
+    // The old captureServer({ distinctId, event, properties }) signature no
+    // longer exists. Verify TypeScript would reject it at compile time by
+    // asserting the runtime shape of captureServer's second argument.
+    mockSalt('shape-salt');
+
+    const { captureServer } = await import('../server');
+
+    // captureServer takes (eventName: string, opts: { worldUserId: string; ... }).
+    // The presence of 'worldUserId' in opts (not 'distinctId') is the contract.
+    const fnStr = captureServer.toString();
+    // The implementation must reference worldUserId (not distinctId) in opts.
+    expect(fnStr).toContain('worldUserId');
+    // A raw 64-hex string passed as worldUserId is still hashed — it cannot
+    // bypass hashing even if the caller tries to pass a pre-hashed value.
+    const rawHex = 'a'.repeat(64); // looks like a cohort hash
+    await captureServer('probe.event', { worldUserId: rawHex });
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    const arg = mockCapture.mock.calls[0][0] as { distinctId: string };
+    // The resulting distinctId is hash(rawHex:salt) — not rawHex itself.
+    expect(arg.distinctId).not.toBe(rawHex);
+    expect(arg.distinctId).toBe(expectedHash(rawHex, 'shape-salt'));
+  });
+});

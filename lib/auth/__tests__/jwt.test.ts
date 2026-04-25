@@ -52,16 +52,17 @@ describe('parseLanguagePref', () => {
 const BASE_CLAIMS: WorldShakerClaims = {
   world_user_id: 'user-abc-123',
   nullifier: 'nullifier-xyz-456',
+  language_pref: 'ko',
 };
 
 describe('signWorldUserJwt / verifyWorldUserJwt round-trip', () => {
-  it('round-trips without language_pref', async () => {
+  it('round-trips without language_pref (defaults to ko)', async () => {
     const token = await signWorldUserJwt(BASE_CLAIMS);
     const verified = await verifyWorldUserJwt(token);
 
     expect(verified.world_user_id).toBe(BASE_CLAIMS.world_user_id);
     expect(verified.nullifier).toBe(BASE_CLAIMS.nullifier);
-    expect(verified.language_pref).toBeUndefined();
+    expect(verified.language_pref).toBe('ko');
   });
 
   it('round-trips with language_pref=ko', async () => {
@@ -84,14 +85,13 @@ describe('signWorldUserJwt / verifyWorldUserJwt round-trip', () => {
     expect(verified.language_pref).toBe('en');
   });
 
-  it('treats missing language_pref claim as undefined (caller defaults to ko)', async () => {
+  it('defaults missing language_pref claim to ko', async () => {
     // Sign without language_pref
     const token = await signWorldUserJwt(BASE_CLAIMS);
     const verified = await verifyWorldUserJwt(token);
 
-    // Caller convention: undefined → default to 'ko'
-    const effective = verified.language_pref ?? 'ko';
-    expect(effective).toBe('ko');
+    // verifyWorldUserJwt now always populates language_pref
+    expect(verified.language_pref).toBe('ko');
   });
 
   it('rejects a tampered token', async () => {

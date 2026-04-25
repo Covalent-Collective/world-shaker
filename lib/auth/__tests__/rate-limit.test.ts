@@ -7,136 +7,68 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 //
 // We build an in-memory Map that mirrors the rate_limit_buckets table:
 //   key = `${world_user_id}|${bucket_key}|${window_start}`
-//   value = { count: number }
+//   value = count (number)
 //
-// The mock returns chainable builder objects that replicate the Supabase JS
-// query-builder interface used by rateLimit():
-//   .from(table).select(...).eq(...).maybeSingle()
-//   .from(table).insert({...})
-//   .from(table).update({...}).eq(...)
-//   .from(table).delete().lt(...)
+// The mock implements two Supabase operations used by rateLimit():
+//   db.rpc('rate_limit_increment', { p_world_user_id, p_bucket_key, p_window_start })
+//   db.from('rate_limit_buckets').delete().lt('window_start', threshold)
 
-type Row = { world_user_id: string; bucket_key: string; window_start: string; count: number };
-
-const db = new Map<string, Row>();
+const db = new Map<string, number>();
 
 function rowKey(world_user_id: string, bucket_key: string, window_start: string): string {
   return `${world_user_id}|${bucket_key}|${window_start}`;
 }
 
-// Minimal chainable builder factory.
-function makeBuilder(table: string) {
-  // Filters accumulated during chaining.
-  const filters: Array<{ col: string; op: string; val: unknown }> = [];
-  // Pending update payload.
-  let updatePayload: Record<string, unknown> | null = null;
-  // Whether we're in delete mode.
-  let deleteMode = false;
-  // Whether we're in select mode.
-  let selectMode = false;
+// Simulate the atomic INSERT...ON CONFLICT DO UPDATE, returning new count.
+function atomicIncrement(world_user_id: string, bucket_key: string, window_start: string): number {
+  const key = rowKey(world_user_id, bucket_key, window_start);
+  const current = db.get(key) ?? 0;
+  const next = current + 1;
+  db.set(key, next);
+  return next;
+}
 
-  function matchingRows(): Row[] {
-    if (table !== 'rate_limit_buckets') return [];
-    return Array.from(db.values()).filter((row) =>
-      filters.every(({ col, op, val }) => {
-        const rowVal = row[col as keyof Row];
-        if (op === 'eq') return rowVal === val;
-        if (op === 'lt') return rowVal < (val as string);
-        return true;
-      }),
-    );
-  }
+// Minimal chainable builder for .from('rate_limit_buckets').delete().lt(...)
+function makeDeleteBuilder() {
+  const filters: Array<{ col: string; val: string }> = [];
 
-  const builder: Record<string, unknown> = {};
-
-  builder.select = (_cols?: string) => {
-    selectMode = true;
-    return builder;
-  };
-
-  builder.insert = (payload: Record<string, unknown>) => {
-    // Execute immediately.
-    if (table === 'rate_limit_buckets') {
-      const key = rowKey(
-        payload['world_user_id'] as string,
-        payload['bucket_key'] as string,
-        payload['window_start'] as string,
-      );
-      if (db.has(key)) {
-        // Simulate unique constraint violation.
-        return Promise.resolve({
-          data: null,
-          error: { code: '23505', message: 'unique violation' },
-        });
+  const builder = {
+    lt(col: string, val: string) {
+      filters.push({ col, val });
+      // Execute delete for matching rows.
+      for (const [key] of Array.from(db.entries())) {
+        const parts = key.split('|');
+        const window_start = parts[2];
+        if (col === 'window_start' && window_start < val) {
+          db.delete(key);
+        }
       }
-      db.set(key, {
-        world_user_id: payload['world_user_id'] as string,
-        bucket_key: payload['bucket_key'] as string,
-        window_start: payload['window_start'] as string,
-        count: payload['count'] as number,
-      });
-    }
-    return Promise.resolve({ data: null, error: null });
+      return builder;
+    },
   };
-
-  builder.update = (payload: Record<string, unknown>) => {
-    updatePayload = payload;
-    // Return builder for chained .eq() calls.
-    return builder;
-  };
-
-  builder.delete = () => {
-    deleteMode = true;
-    return builder;
-  };
-
-  builder.eq = (col: string, val: unknown) => {
-    filters.push({ col, op: 'eq', val });
-    return builder;
-  };
-
-  builder.lt = (col: string, val: unknown) => {
-    filters.push({ col, op: 'lt', val });
-    // Delete executes on .lt() terminal call.
-    if (deleteMode && table === 'rate_limit_buckets') {
-      const toDelete = matchingRows();
-      toDelete.forEach((row) => {
-        db.delete(rowKey(row.world_user_id, row.bucket_key, row.window_start));
-      });
-    }
-    return builder;
-  };
-
-  builder.maybeSingle = () => {
-    if (selectMode) {
-      const rows = matchingRows();
-      if (rows.length === 0) return Promise.resolve({ data: null, error: null });
-      return Promise.resolve({ data: rows[0], error: null });
-    }
-    return Promise.resolve({ data: null, error: null });
-  };
-
-  // Make the builder itself thenable so that .update().eq().eq() can be
-  // awaited without calling .maybeSingle().
-  (builder as Record<string, unknown>).then = (
-    resolve: (v: { data: null; error: null }) => void,
-  ) => {
-    // Execute pending update on await.
-    if (updatePayload !== null && table === 'rate_limit_buckets') {
-      const rows = matchingRows();
-      rows.forEach((row) => {
-        const key = rowKey(row.world_user_id, row.bucket_key, row.window_start);
-        db.set(key, { ...row, count: updatePayload!['count'] as number });
-      });
-    }
-    resolve({ data: null, error: null });
-  };
-
   return builder;
 }
 
+function makeFromBuilder(_table: string) {
+  return {
+    delete() {
+      return makeDeleteBuilder();
+    },
+  };
+}
+
 const mockGetServiceClient = vi.fn(() => ({
-  from: (table: string) => makeBuilder(table),
+  rpc: (
+    fn: string,
+    args: { p_world_user_id: string; p_bucket_key: string; p_window_start: string },
+  ) => {
+    if (fn === 'rate_limit_increment') {
+      const count = atomicIncrement(args.p_world_user_id, args.p_bucket_key, args.p_window_start);
+      return Promise.resolve({ data: count, error: null });
+    }
+    return Promise.resolve({ data: null, error: { message: `unknown rpc: ${fn}` } });
+  },
+  from: (table: string) => makeFromBuilder(table),
 }));
 
 vi.mock('@/lib/supabase/service', () => ({

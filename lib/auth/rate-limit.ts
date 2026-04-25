@@ -24,23 +24,19 @@ export const agentAnswerRateLimit = { max: 30, windowSeconds: 60 } as const;
  * Schema: (world_user_id UUID, bucket_key TEXT, window_start TIMESTAMPTZ, count INT,
  *          PRIMARY KEY(world_user_id, bucket_key, window_start))
  *
- * Algorithm (SELECT → INSERT-or-UPDATE):
+ * Algorithm (atomic RPC):
  *  1. Compute window_start = epoch-aligned start of current window.
- *  2. SELECT existing count for (user, bucket, window).
- *  3. If row exists UPDATE count = count + 1; else INSERT count = 1.
- *  4. Evaluate new count against max.
- *  5. Opportunistically DELETE stale rows older than 1 hour (~1% of calls).
- *
- * Note: The SELECT+UPDATE has a small race window at very high concurrency.
- * For strict atomicity, add a rate_limit_increment(p_user, p_bucket, p_window)
- * Postgres RPC in a future migration. Acceptable for v0.
+ *  2. Call rate_limit_increment(p_world_user_id, p_bucket_key, p_window_start) RPC.
+ *     The RPC does INSERT...ON CONFLICT DO UPDATE atomically, returning new count.
+ *  3. Evaluate new count against max.
+ *  4. Opportunistically DELETE stale rows older than 1 hour (~1% of calls).
  */
 export async function rateLimit(opts: RateLimitOpts): Promise<RateLimitResult> {
   const { world_user_id, bucket_key, max, windowSeconds } = opts;
 
   const nowMs = Date.now();
   const windowStartMs = Math.floor(nowMs / (windowSeconds * 1000)) * windowSeconds * 1000;
-  const windowStart = new Date(windowStartMs).toISOString();
+  const window_start = new Date(windowStartMs).toISOString();
 
   const db = getServiceClient();
 
@@ -50,74 +46,19 @@ export async function rateLimit(opts: RateLimitOpts): Promise<RateLimitResult> {
     void db.from('rate_limit_buckets').delete().lt('window_start', staleThreshold);
   }
 
-  // SELECT existing row for this (user, bucket, window).
-  const { data: existing, error: selectError } = await db
-    .from('rate_limit_buckets')
-    .select('count')
-    .eq('world_user_id', world_user_id)
-    .eq('bucket_key', bucket_key)
-    .eq('window_start', windowStart)
-    .maybeSingle();
+  const { data, error } = await db.rpc('rate_limit_increment', {
+    p_world_user_id: world_user_id,
+    p_bucket_key: bucket_key,
+    p_window_start: window_start,
+  });
 
-  if (selectError) {
-    console.error('[rate-limit] select error', selectError);
+  if (error) {
+    console.error('[rate-limit] rpc error', error);
     // Fail open: allow the request.
     return { ok: true, retryAfterSeconds: 0, remaining: max };
   }
 
-  let newCount: number;
-
-  if (existing === null) {
-    // No row yet — INSERT with count=1.
-    const { error: insertError } = await db
-      .from('rate_limit_buckets')
-      .insert({ world_user_id, bucket_key, window_start: windowStart, count: 1 });
-
-    if (insertError) {
-      // Another request may have raced and inserted first; re-SELECT and increment.
-      const { data: raceRow, error: raceSelectError } = await db
-        .from('rate_limit_buckets')
-        .select('count')
-        .eq('world_user_id', world_user_id)
-        .eq('bucket_key', bucket_key)
-        .eq('window_start', windowStart)
-        .maybeSingle();
-
-      if (raceSelectError || raceRow === null) {
-        console.error('[rate-limit] race insert/select error', insertError, raceSelectError);
-        return { ok: true, retryAfterSeconds: 0, remaining: max };
-      }
-
-      newCount = (raceRow as { count: number }).count + 1;
-      const { error: raceUpdateError } = await db
-        .from('rate_limit_buckets')
-        .update({ count: newCount })
-        .eq('world_user_id', world_user_id)
-        .eq('bucket_key', bucket_key)
-        .eq('window_start', windowStart);
-
-      if (raceUpdateError) {
-        console.error('[rate-limit] race update error', raceUpdateError);
-        return { ok: true, retryAfterSeconds: 0, remaining: max };
-      }
-    } else {
-      newCount = 1;
-    }
-  } else {
-    // Row exists — UPDATE count = existing + 1.
-    newCount = (existing as { count: number }).count + 1;
-    const { error: updateError } = await db
-      .from('rate_limit_buckets')
-      .update({ count: newCount })
-      .eq('world_user_id', world_user_id)
-      .eq('bucket_key', bucket_key)
-      .eq('window_start', windowStart);
-
-    if (updateError) {
-      console.error('[rate-limit] update error', updateError);
-      return { ok: true, retryAfterSeconds: 0, remaining: max };
-    }
-  }
+  const newCount = data as number;
 
   if (newCount > max) {
     const windowEndMs = windowStartMs + windowSeconds * 1000;

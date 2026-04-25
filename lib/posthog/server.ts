@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { PostHog } from 'posthog-node';
-import { setPosthogIdentity } from './cohort';
+import { hashCohort, setPosthogIdentity } from './cohort';
 
 let cached: PostHog | null = null;
 
@@ -9,8 +9,8 @@ let cached: PostHog | null = null;
  * Server-side PostHog client for capturing backend events
  * (cron job runs, LLM cost, abuse signals).
  *
- * Identification: use `identifyServer(ph, world_user_id)` so the distinct_id
- * is always the cohort hash (sha256(world_user_id:salt)), never the raw id.
+ * Identification: distinct_id is always the cohort hash
+ * (sha256(world_user_id:salt)), never the raw id.
  */
 export function getPostHogServer(): PostHog | null {
   if (cached) return cached;
@@ -24,17 +24,27 @@ export function getPostHogServer(): PostHog | null {
   return cached;
 }
 
-export async function captureServer(args: {
-  distinctId: string;
-  event: string;
-  properties?: Record<string, unknown>;
-}) {
+/**
+ * Capture a server-side event in PostHog.
+ *
+ * The distinct_id is always derived from worldUserId via hashCohort()
+ * (sha256(worldUserId:salt)). Raw world user IDs are never forwarded to PostHog.
+ *
+ * @param eventName  - The PostHog event name.
+ * @param opts.worldUserId  - The caller's raw World ID (hashed before use).
+ * @param opts.properties   - Optional event properties.
+ */
+export async function captureServer(
+  eventName: string,
+  opts: { worldUserId: string; properties?: Record<string, unknown> },
+): Promise<void> {
   const ph = getPostHogServer();
   if (!ph) return;
+  const distinctId = await hashCohort(opts.worldUserId);
   ph.capture({
-    distinctId: args.distinctId,
-    event: args.event,
-    properties: args.properties,
+    distinctId,
+    event: eventName,
+    properties: opts.properties,
   });
   await ph.flush();
 }

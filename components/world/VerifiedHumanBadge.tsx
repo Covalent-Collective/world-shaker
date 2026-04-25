@@ -29,7 +29,10 @@ export default function VerifiedHumanBadge({
   }
 
   return (
-    <span className={cn('inline-flex items-center gap-1 text-xs text-muted-foreground', className)}>
+    <span
+      className={cn('inline-flex items-center gap-1 text-xs text-muted-foreground', className)}
+      aria-label="World ID Verified Human"
+    >
       <ShieldCheck className="h-5 w-5 shrink-0" aria-hidden="true" />
       <span>{label}</span>
     </span>

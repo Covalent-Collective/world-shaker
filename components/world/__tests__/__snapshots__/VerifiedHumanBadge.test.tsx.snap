@@ -35,6 +35,7 @@ exports[`VerifiedHumanBadge > compact variant > matches snapshot 1`] = `
 
 exports[`VerifiedHumanBadge > full variant (default) > matches snapshot 1`] = `
 <span
+  aria-label="World ID Verified Human"
   class="inline-flex items-center gap-1 text-xs text-muted-foreground"
 >
   <svg

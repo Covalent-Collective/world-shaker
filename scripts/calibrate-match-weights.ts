@@ -20,6 +20,12 @@
  *   }
  *
  * See plan v4 Step 1.13 (US-015).
+ *
+ * TODO (Phase 2 follow-up): When the eval set is authored, the --apply path
+ * should also call match_candidates() against the eval set pairs and
+ * re-evaluate end-to-end recall/precision before writing weights to
+ * app_settings. Currently --apply writes weights directly from grid-search
+ * Spearman rho without an end-to-end match_candidates() validation pass.
  */
 
 import { existsSync, readFileSync } from 'fs';
@@ -288,23 +294,27 @@ function gridSearch(train: EvalRow[]): GridCandidate[] {
 // ---------------------------------------------------------------------------
 
 async function applyWeights(best: GridCandidate): Promise<void> {
+  // app_settings is a single-row table with fixed columns (id=1, per
+  // supabase/migrations/0005_app_settings.sql). It does NOT use a key/value
+  // row format — update the specific columns directly.
+  //
   // Dynamic import avoids pulling server-only into --help/missing-corpus paths.
   const { getServiceClient } = await import('@/lib/supabase/service');
   const client = getServiceClient();
 
-  const { error } = await client.from('app_settings').upsert(
-    [
-      { key: 'match_weight_cosine', value: String(best.w_cosine) },
-      { key: 'match_weight_struct', value: String(best.w_struct) },
-    ],
-    { onConflict: 'key' },
-  );
+  const { error } = await client
+    .from('app_settings')
+    .update({
+      match_weight_cosine: best.w_cosine,
+      match_weight_struct: best.w_struct,
+    })
+    .eq('id', 1);
 
   if (error) {
-    console.error('Failed to upsert weights:', error.message);
+    console.error('Failed to update weights:', error.message);
     process.exit(1);
   }
-  console.error(`Applied: w_cosine=${best.w_cosine}, w_struct=${best.w_struct}`);
+  console.log(`Applied: w_cosine=${best.w_cosine}, w_struct=${best.w_struct}`);
 }
 
 // ---------------------------------------------------------------------------
