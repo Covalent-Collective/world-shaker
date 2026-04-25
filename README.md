@@ -10,14 +10,14 @@
 - **Auth**: Wallet Auth (primary) + World ID **orb** (uniqueness gate)
 - **Database**: Supabase Postgres + RLS + pgvector
 - **Background jobs**: Inngest (nightly match generation)
-- **LLM**: Claude Sonnet 4.6 (post-ranking explanation only — never scoring)
+- **LLM gateway**: OpenRouter (single API key) — chat = Claude Sonnet 4.6, embeddings = OpenAI text-embedding-3-small. Models are env-overridable.
 - **Hosting**: Vercel
 
 ## Prerequisites
 
 1. **World Developer Portal** app registered → `app_id`, `rp_id`, `signing_key`
 2. **Supabase project** created → project URL, anon key, service role key
-3. **Anthropic API** key
+3. **OpenRouter API** key (covers Anthropic + OpenAI via single gateway)
 4. **Inngest** workspace
 5. Node 20+, npm, Supabase CLI
 
@@ -31,7 +31,7 @@ npm install
 
 # 2. env
 cp .env.example .env.local
-# fill in values from Developer Portal, Supabase, Anthropic, etc.
+# fill in values from Developer Portal, Supabase, OpenRouter, etc.
 
 # 3. database
 supabase db push  # applies supabase/migrations/*
@@ -59,8 +59,9 @@ app/
 
 lib/
 ├── world/              # World ID constants, verify helpers
+├── auth/               # JWT signing for RLS (jose)
 ├── supabase/           # client / server / service-role clients
-├── llm/                # Anthropic wrappers + prompts
+├── llm/                # OpenRouter client + prompts
 └── inngest/            # job client + functions
 
 supabase/

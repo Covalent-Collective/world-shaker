@@ -17,7 +17,6 @@
     "inngest:dev": "npx inngest-cli@latest dev"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.104.0",
     "@worldcoin/idkit": "^4.1.0",

@@ -1,5 +1,8 @@
 import { inngest } from '../client';
 import { getServiceClient } from '@/lib/supabase/service';
+// Available helpers for the matching pipeline (used after compatibility scoring lands):
+//   import { generateExplanation, embedText } from '@/lib/llm/openrouter';
+//   import { EXPLANATION_SYSTEM } from '@/lib/llm/prompts/explanation';
 
 /**
  * Nightly matching job.
