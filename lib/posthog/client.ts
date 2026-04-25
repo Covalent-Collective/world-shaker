@@ -30,3 +30,17 @@ export function initPostHog() {
 }
 
 export { posthog };
+
+/**
+ * Identify a client-side PostHog session using the cohort hash as distinct_id.
+ *
+ * Call this from client components after obtaining `world_user_id` from the
+ * server session. The actual hashing happens server-side in
+ * `lib/posthog/cohort.ts`; this helper accepts the pre-computed values so the
+ * raw world_user_id never reaches the browser bundle.
+ */
+export function identifyClient(hashedDistinctId: string, predecessor: string | null): void {
+  posthog.identify(hashedDistinctId, {
+    posthog_cohort_predecessor: predecessor,
+  });
+}

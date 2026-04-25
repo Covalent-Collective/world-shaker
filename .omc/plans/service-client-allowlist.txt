@@ -1,0 +1,18 @@
+# service-client-allowlist.txt
+# One path per line. Supports trailing /** glob patterns.
+# Lines starting with # are comments.
+# This list is the source of truth for which files may call getServiceClient().
+# The runtime assertion in lib/supabase/service.ts and the CI test in
+# tests/ci/service-client-whitelist.test.ts both derive from this file.
+
+lib/inngest/**
+lib/posthog/cohort.ts
+app/api/inngest/route.ts
+app/api/verify/route.ts
+app/api/wallet-auth/route.ts
+app/api/conversation/[id]/stream/route.ts
+app/api/user/language/route.ts
+scripts/calibrate-match-weights.ts
+scripts/validate-hnsw-recall.ts
+lib/auth/rate-limit.ts
+lib/quota/daily.ts

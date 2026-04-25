@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, Crimson_Pro } from 'next/font/google';
+import { cookies } from 'next/headers';
 import './globals.css';
 import { Providers } from './providers';
 import { Toaster } from '@/components/ui/sonner';
+import { LangProvider } from '@/lib/i18n/useT';
+import type { Lang } from '@/lib/i18n/types';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -31,11 +34,21 @@ export const viewport: Viewport = {
   themeColor: '#0A0A0F',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+function isLang(value: string | undefined): value is Lang {
+  return value === 'ko' || value === 'en';
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const rawLang = cookieStore.get('lang')?.value;
+  const lang: Lang = isLang(rawLang) ? rawLang : 'ko';
+
   return (
-    <html lang="en" className={`dark ${inter.variable} ${crimsonPro.variable}`}>
+    <html lang={lang} className={`dark ${inter.variable} ${crimsonPro.variable}`}>
       <body className="bg-bg text-text font-sans antialiased">
-        <Providers>{children}</Providers>
+        <LangProvider lang={lang}>
+          <Providers>{children}</Providers>
+        </LangProvider>
         <Toaster />
       </body>
     </html>
