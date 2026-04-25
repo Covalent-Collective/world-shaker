@@ -19,6 +19,10 @@ next-env.d.ts
 supabase/.branches/
 supabase/.temp/
 types/db.gen.ts
-.omc/
+.omc/*
+!.omc/specs/
+!.omc/specs/**
+!.omc/plans/
+!.omc/plans/**
 .omx/
 
