@@ -14,7 +14,6 @@
 - **Hosting**: Vercel
 - **Client tooling**: TanStack Query, react-hook-form + Zod, next-safe-action, shadcn/ui (Radix + cva), Sonner, Lucide
 - **Observability**: PostHog (product analytics + session replay + LLM analytics + errors)
-- **Abuse protection**: Arcjet (bot detection, attack shield, rate limit on `/api/verify` + `/api/wallet-auth`)
 - **DX**: lefthook + lint-staged + commitlint (conventional commits)
 
 ## Prerequisites

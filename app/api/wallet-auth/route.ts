@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { getServiceClient } from '@/lib/supabase/service';
 import { WORLD_ACTION } from '@/lib/world/constants';
-import { aj, verifyRateLimit } from '@/lib/arcjet';
 
 export const runtime = 'nodejs';
 
@@ -23,11 +22,6 @@ function hashNonce(nonce: string): string {
  * Codex HIGH-7: replay protection requires server-side state.
  */
 export async function GET(req: Request) {
-  const decision = await aj.protect(req as never);
-  if (decision.isDenied()) {
-    return NextResponse.json({ error: 'arcjet_denied' }, { status: 403 });
-  }
-
   const url = new URL(req.url);
   if (url.searchParams.get('action') !== 'nonce') {
     return NextResponse.json({ error: 'unknown_action' }, { status: 400 });
@@ -76,14 +70,6 @@ const Body = z.object({
  */
 export async function POST(req: Request) {
   try {
-    const decision = await aj.withRule(verifyRateLimit).protect(req as never, { requested: 1 });
-    if (decision.isDenied()) {
-      return NextResponse.json(
-        { error: 'arcjet_denied', reason: decision.reason.toString() },
-        { status: decision.reason.isRateLimit() ? 429 : 403 },
-      );
-    }
-
     const body = Body.safeParse(await req.json());
     if (!body.success) {
       return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
