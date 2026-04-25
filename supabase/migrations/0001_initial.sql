@@ -2,15 +2,21 @@
 -- World Shaker — Initial schema (v0)
 --
 -- Per /Users/jyong/projects/.omc/specs/deep-interview-cupid-proxy-product-v3.md
+-- and Codex review at .omc/artifacts/ask/codex-review-*.md (commit 22427c6).
 --
 -- Six core tables: users, agents, matches, conversations, outcome_events, reports
+-- Plus auth_nonces for replay-safe wallet auth.
 --
 -- Design decisions baked in:
 --   * nullifier as TEXT (not numeric — JS BigInt serialization risk per Codex)
 --   * UNIQUE(nullifier, action) enforces 1-human-1-account
+--   * verification_level as TEXT + CHECK (not enum — single-value enums are
+--     painful to evolve, per Codex review)
 --   * `surface` discriminator on agent activity tables — v2 will add 'agora'
---   * pgvector embedding for matching prefilter
+--   * pgvector embedding for matching prefilter (partial index — active+dating only)
 --   * outcome_events schema fixed Day 0 — moat data layer
+--   * conversations have UNIQUE pair index — prevents A↔B duplication
+--   * matches have partial UNIQUE — prevents duplicate cards for active states
 -- ===========================================================================
 
 create extension if not exists pgcrypto;
@@ -20,7 +26,6 @@ create extension if not exists vector;
 
 create type agent_status as enum ('active', 'paused', 'suspended');
 create type match_status as enum ('pending', 'accepted', 'skipped', 'mutual', 'expired');
-create type verification_level as enum ('orb');
 create type ritual_surface as enum ('dating');  -- v2: alter type to add 'agora'
 create type outcome_event_type as enum (
   'viewed',
@@ -55,13 +60,29 @@ create table public.users (
   action text not null,
   wallet_address text,
   world_username text,
-  verification_level verification_level not null default 'orb',
+  -- TEXT + CHECK rather than enum: World ID v4 may evolve credential names,
+  -- and altering single-value enums is costly. (Codex review)
+  verification_level text not null default 'orb' check (verification_level = 'orb'),
   created_at timestamptz not null default now(),
   unique (nullifier, action),
   unique (wallet_address)
 );
 
 create index idx_users_username on public.users (world_username) where world_username is not null;
+
+-- ---------- auth_nonces -------------------------------------------------
+-- Replay-safe nonce store for wallet auth (SIWE-style).
+-- Nonces issued by /api/wallet-auth?action=nonce, consumed on POST.
+
+create table public.auth_nonces (
+  nonce_hash text primary key,
+  issued_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  consumed_at timestamptz
+);
+
+create index idx_auth_nonces_expires on public.auth_nonces (expires_at)
+  where consumed_at is null;
 
 -- ---------- agents -------------------------------------------------------
 
@@ -78,9 +99,12 @@ create table public.agents (
 );
 
 create index idx_agents_status on public.agents (status) where status = 'active';
--- HNSW index for fast top-K cosine similarity over the active pool.
-create index idx_agents_embedding_hnsw on public.agents
-  using hnsw (embedding vector_cosine_ops);
+-- Partial HNSW: only active+dating agents with embedding present.
+-- Per Codex: filtered ANN queries get the right recall when index already
+-- excludes dead rows.
+create index idx_agents_active_dating_embedding_hnsw on public.agents
+  using hnsw (embedding vector_cosine_ops)
+  where status = 'active' and surface = 'dating' and embedding is not null;
 
 -- ---------- conversations -----------------------------------------------
 
@@ -97,10 +121,13 @@ create table public.conversations (
       then agent_a_id::text || '|' || agent_b_id::text
       else agent_b_id::text || '|' || agent_a_id::text
     end
-  ) stored
+  ) stored,
+  constraint conversations_not_self check (agent_a_id <> agent_b_id)
 );
 
-create index idx_conversations_pair_key on public.conversations (pair_key);
+-- UNIQUE — Codex: the previous non-unique index allowed duplicate transcripts.
+create unique index conversations_pair_key_surface_unique
+  on public.conversations (surface, pair_key);
 create index idx_conversations_agent_a on public.conversations (agent_a_id);
 create index idx_conversations_agent_b on public.conversations (agent_b_id);
 
@@ -115,6 +142,9 @@ create table public.matches (
   why_click text,
   watch_out text,
   highlight_quotes jsonb not null default '[]'::jsonb,
+  -- Pre-rendered full transcript surfaced to the user (per v3 spec —
+  -- conversations.turns stays service-role only). Codex flagged the missing column.
+  rendered_transcript jsonb not null default '[]'::jsonb,
   status match_status not null default 'pending',
   world_chat_link text,
   created_at timestamptz not null default now(),
@@ -126,6 +156,12 @@ create table public.matches (
 create index idx_matches_user_status on public.matches (user_id, status);
 create index idx_matches_candidate_status on public.matches (candidate_user_id, status);
 create index idx_matches_pending on public.matches (created_at desc) where status = 'pending';
+
+-- Partial UNIQUE prevents duplicate active match cards from concurrent jobs.
+-- Codex finding HIGH-5.
+create unique index matches_user_candidate_active_unique
+  on public.matches (user_id, candidate_user_id)
+  where status in ('pending', 'accepted', 'mutual');
 
 -- ---------- outcome_events (THE moat data layer) -----------------------
 
@@ -152,7 +188,9 @@ create table public.reports (
   reason report_reason not null,
   detail text,
   created_at timestamptz not null default now(),
-  unique (reporter_id, reported_user_id)
+  unique (reporter_id, reported_user_id),
+  -- Codex MEDIUM: prevent users from reporting themselves.
+  constraint reports_not_self check (reporter_id <> reported_user_id)
 );
 
 create index idx_reports_reported on public.reports (reported_user_id);
@@ -191,3 +229,25 @@ $$ language plpgsql;
 create trigger reports_auto_suspend
   after insert on public.reports
   for each row execute function public.suspend_on_two_reports();
+
+-- ---------- auth helpers ------------------------------------------------
+-- Custom-claim approach for RLS (Codex review HIGH-1).
+-- The app issues a JWT signed with SUPABASE_JWT_SECRET after orb verify
+-- succeeds, with `world_user_id` claim set to public.users.id. RLS reads
+-- this claim instead of auth.uid().
+
+create or replace function public.current_world_user_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select nullif(auth.jwt() ->> 'world_user_id', '')::uuid
+$$;
+
+comment on function public.current_world_user_id() is
+  'Returns the world_user_id claim from the active JWT. NULL when no JWT or claim missing. Used by RLS policies — see migration 0002.';
+
+-- Grant execute to anon/authenticated so RLS can call it.
+grant execute on function public.current_world_user_id() to anon, authenticated;

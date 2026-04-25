@@ -29,8 +29,16 @@ export interface User {
   action: string;
   wallet_address: string | null;
   world_username: string | null;
+  /** Stored as TEXT + CHECK; only 'orb' permitted in v1. */
   verification_level: 'orb';
   created_at: string;
+}
+
+export interface AuthNonce {
+  nonce_hash: string;
+  issued_at: string;
+  expires_at: string;
+  consumed_at: string | null;
 }
 
 export interface Agent {
@@ -62,6 +70,7 @@ export interface Match {
   why_click: string | null;
   watch_out: string | null;
   highlight_quotes: Array<{ speaker: 'A' | 'B'; text: string }>;
+  rendered_transcript: Array<{ speaker: 'A' | 'B'; text: string }>;
   status: MatchStatus;
   world_chat_link: string | null;
   created_at: string;

@@ -20,4 +20,5 @@ supabase/.branches/
 supabase/.temp/
 types/db.gen.ts
 .omc/
+.omx/
 
