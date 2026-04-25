@@ -14,5 +14,8 @@ app/api/conversation/[id]/stream/route.ts
 app/api/user/language/route.ts
 scripts/calibrate-match-weights.ts
 scripts/validate-hnsw-recall.ts
+scripts/smoke-conversation.ts
 lib/auth/rate-limit.ts
 lib/quota/daily.ts
+lib/llm/safety.ts
+lib/llm/budget.ts

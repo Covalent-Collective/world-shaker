@@ -17,7 +17,8 @@
     "inngest:dev": "npx inngest-cli@latest dev",
     "eval:safety": "tsx scripts/eval-safety.ts",
     "calibrate:match-weights": "tsx scripts/calibrate-match-weights.ts",
-    "validate:hnsw": "tsx scripts/validate-hnsw-recall.ts"
+    "validate:hnsw": "tsx scripts/validate-hnsw-recall.ts",
+    "smoke:conversation": "tsx scripts/smoke-conversation.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
