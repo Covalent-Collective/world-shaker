@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { verifyWithDevPortal } from '@/lib/world/verify';
 import { getServiceClient } from '@/lib/supabase/service';
 import { WORLD_ACTION } from '@/lib/world/constants';
-import { signWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
+import { signWorldUserJwt, SESSION_COOKIE, parseLanguagePref } from '@/lib/auth/jwt';
 
 export const runtime = 'nodejs';
 
@@ -41,6 +41,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'verify_failed', detail: result.error }, { status: 400 });
     }
 
+    // Derive language preference from Accept-Language header.
+    const languagePref = parseLanguagePref(req.headers.get('accept-language'));
+
+    // Derive timezone:
+    // 1. x-timezone header (set by client JS before the call, most reliable).
+    // 2. Fallback to 'UTC' — MiniKit does not expose timezone reliably.
+    const timezone = req.headers.get('x-timezone') ?? 'UTC';
+
     const supabase = getServiceClient();
 
     // Race-safe upsert: try insert first; if (nullifier, action) UNIQUE fires,
@@ -51,6 +59,8 @@ export async function POST(req: Request) {
         nullifier: result.nullifier,
         verification_level: result.verification_level,
         action: WORLD_ACTION,
+        language_pref: languagePref,
+        timezone,
       })
       .select('id, nullifier')
       .single();
@@ -74,6 +84,11 @@ export async function POST(req: Request) {
         console.error('user lookup error:', selectError);
         return NextResponse.json({ error: 'user_lookup_failed' }, { status: 500 });
       }
+      // Update language_pref and timezone on re-verify so they stay current.
+      await supabase
+        .from('users')
+        .update({ language_pref: languagePref, timezone })
+        .eq('id', existing.id);
       userId = existing.id;
       alreadyRegistered = true;
     } else {
@@ -83,6 +98,7 @@ export async function POST(req: Request) {
     const token = await signWorldUserJwt({
       world_user_id: userId,
       nullifier: result.nullifier,
+      language_pref: languagePref,
     });
 
     const response = NextResponse.json({

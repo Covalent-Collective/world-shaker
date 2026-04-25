@@ -30,6 +30,27 @@ export interface WorldShakerClaims {
   world_user_id: string;
   /** Echo of the World ID nullifier — for audit only. */
   nullifier: string;
+  /**
+   * User's preferred language, derived from Accept-Language header at verify
+   * time. Missing claim means caller should default to 'ko'.
+   */
+  language_pref?: 'ko' | 'en';
+}
+
+/**
+ * Parse the Accept-Language header into a supported language preference.
+ *
+ * Rules (case-insensitive, first tag only):
+ * - Starts with 'ko' → 'ko'
+ * - Starts with 'en' → 'en'
+ * - null, '', or any other value → 'ko' (default)
+ */
+export function parseLanguagePref(acceptLanguage: string | null): 'ko' | 'en' {
+  if (!acceptLanguage) return 'ko';
+  const lower = acceptLanguage.trimStart().toLowerCase();
+  if (lower.startsWith('ko')) return 'ko';
+  if (lower.startsWith('en')) return 'en';
+  return 'ko';
 }
 
 export async function signWorldUserJwt(
@@ -58,10 +79,15 @@ export async function verifyWorldUserJwt(token: string): Promise<WorldShakerClai
   if (typeof payload.world_user_id !== 'string' || typeof payload.nullifier !== 'string') {
     throw new Error('jwt_missing_claims');
   }
-  return {
+  const claims: WorldShakerClaims = {
     world_user_id: payload.world_user_id,
     nullifier: payload.nullifier,
   };
+  // language_pref is optional; missing claim → caller defaults to 'ko'
+  if (payload.language_pref === 'ko' || payload.language_pref === 'en') {
+    claims.language_pref = payload.language_pref;
+  }
+  return claims;
 }
 
 /** Cookie name used to ship the JWT back to the browser. */
