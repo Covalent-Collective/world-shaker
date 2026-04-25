@@ -31,12 +31,16 @@
     "zod": "^4.3.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.2",
+    "@commitlint/config-conventional": "^20.5.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.2.0",
+    "lefthook": "^2.1.6",
+    "lint-staged": "^16.4.0",
     "postcss": "^8.4.49",
     "prettier": "^3.8.0",
     "supabase": "^2.95.0",

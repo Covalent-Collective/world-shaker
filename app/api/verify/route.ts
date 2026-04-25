@@ -4,6 +4,7 @@ import { verifyWithDevPortal } from '@/lib/world/verify';
 import { getServiceClient } from '@/lib/supabase/service';
 import { WORLD_ACTION } from '@/lib/world/constants';
 import { signWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
+import { aj, verifyRateLimit } from '@/lib/arcjet';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +32,14 @@ const Body = z.object({
  */
 export async function POST(req: Request) {
   try {
+    const decision = await aj.withRule(verifyRateLimit).protect(req as never, { requested: 1 });
+    if (decision.isDenied()) {
+      return NextResponse.json(
+        { error: 'arcjet_denied', reason: decision.reason.toString() },
+        { status: decision.reason.isRateLimit() ? 429 : 403 },
+      );
+    }
+
     const body = Body.safeParse(await req.json());
     if (!body.success) {
       return NextResponse.json({ error: 'invalid_body' }, { status: 400 });

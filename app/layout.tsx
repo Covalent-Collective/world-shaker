@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, Crimson_Pro } from 'next/font/google';
 import './globals.css';
 import { Providers } from './providers';
+import { Toaster } from '@/components/ui/sonner';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`dark ${inter.variable} ${crimsonPro.variable}`}>
       <body className="bg-bg text-text font-sans antialiased">
         <Providers>{children}</Providers>
+        <Toaster />
       </body>
     </html>
   );
