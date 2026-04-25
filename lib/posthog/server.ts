@@ -29,10 +29,6 @@ export function getPostHogServer(): PostHog | null {
  *
  * The distinct_id is always derived from worldUserId via hashCohort()
  * (sha256(worldUserId:salt)). Raw world user IDs are never forwarded to PostHog.
- *
- * @param eventName  - The PostHog event name.
- * @param opts.worldUserId  - The caller's raw World ID (hashed before use).
- * @param opts.properties   - Optional event properties.
  */
 export async function captureServer(
   eventName: string,
@@ -53,8 +49,6 @@ export async function captureServer(
  * Identify a server-side PostHog session using the cohort hash as distinct_id.
  * Wraps `setPosthogIdentity` from `lib/posthog/cohort.ts` with a PostHog Node
  * client that conforms to the expected identify interface.
- *
- * @param world_user_id - The caller's raw World ID (never sent to PostHog).
  */
 export async function identifyServer(world_user_id: string): Promise<void> {
   const ph = getPostHogServer();

@@ -1,12 +1,3 @@
-/**
- * Feature flags. Each flag reads from the corresponding env var first,
- * defaulting to false when the env var is absent or not 'true'.
- *
- * Usage:
- *   import { flags, isEnabled } from '@/lib/flags';
- *   if (isEnabled('BILINGUAL_PROMPTS_V1')) { ... }
- */
-
 function envFlag(name: string): boolean {
   return process.env[name] === 'true';
 }
@@ -20,10 +11,7 @@ export const flags = {
 
 export type FlagName = keyof typeof flags;
 
-/**
- * Type-safe flag gate helper. Reads the live env var on each call so that
- * tests can override process.env without module re-import.
- */
+/** Reads the live env var on each call so tests can override process.env without module re-import. */
 export function isEnabled(name: FlagName): boolean {
   return envFlag(name);
 }

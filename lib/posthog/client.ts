@@ -38,9 +38,6 @@ export { posthog };
  * server session. The actual hashing happens server-side in
  * `lib/posthog/cohort.ts`; this helper accepts the pre-computed values so the
  * raw world_user_id never reaches the browser bundle.
- *
- * @param hashedDistinctId - Result of `hashCohort(world_user_id)` (server-computed).
- * @param predecessor - Result of `getPredecessorCohort(world_user_id)` (may be null).
  */
 export function identifyClient(hashedDistinctId: string, predecessor: string | null): void {
   posthog.identify(hashedDistinctId, {

@@ -33,7 +33,6 @@ const Body = z.object({
  *   explicit .eq() filter — this is the correct pattern for custom-JWT routes.
  */
 export async function POST(req: Request) {
-  // 1. Extract and verify the custom session JWT.
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
@@ -48,7 +47,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  // 2. Validate request body.
   const body = Body.safeParse(await req.json());
   if (!body.success) {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
@@ -56,7 +54,6 @@ export async function POST(req: Request) {
 
   const { lang } = body.data;
 
-  // 3. Update language_pref scoped explicitly to the authenticated user.
   const supabase = getServiceClient();
   const { error } = await supabase
     .from('users')
@@ -68,7 +65,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'update_failed' }, { status: 500 });
   }
 
-  // 4. Set the lang cookie and return.
   const response = NextResponse.json({ ok: true, lang });
   response.cookies.set('lang', lang, {
     httpOnly: false,

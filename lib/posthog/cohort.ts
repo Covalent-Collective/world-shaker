@@ -40,10 +40,6 @@ async function fetchSalt(): Promise<string> {
   return saltCache.value;
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 /**
  * Computes the PostHog cohort distinct_id for the given World ID user.
  *
@@ -68,9 +64,6 @@ export async function hashCohort(world_user_id: string): Promise<string> {
  * v0: returns null. Full implementation is deferred to Step 4.9 (cohort
  * rotation Inngest fn) which will write the predecessor hash to
  * `users.posthog_cohort` before flipping the salt in `app_settings`.
- *
- * @param world_user_id - The caller's World ID user identifier.
- * @returns null in v0; in v1+ the previous quarter's cohort hash.
  */
 export async function getPredecessorCohort(_world_user_id: string): Promise<string | null> {
   return null;
@@ -81,12 +74,8 @@ export async function getPredecessorCohort(_world_user_id: string): Promise<stri
  *   - `distinctId` = hashCohort(world_user_id)
  *   - `$set.posthog_cohort_predecessor` = getPredecessorCohort(world_user_id)
  *
- * Use this helper from both server-side (PostHog Node) and client-side
- * (posthog-js) wrappers so distinct_id is always the cohort hash, never the
- * raw World ID.
- *
- * The `client` parameter accepts any object with an `identify` method that
- * matches the posthog-js / posthog-node identify signature.
+ * Use from both server-side (PostHog Node) and client-side (posthog-js) so
+ * distinct_id is always the cohort hash, never the raw World ID.
  */
 export async function setPosthogIdentity(
   client: { identify: (args: { distinctId: string; properties: Record<string, unknown> }) => void },
