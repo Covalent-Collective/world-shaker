@@ -39,7 +39,7 @@ export default async function ConversationPage({
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   let worldUserId: string;
@@ -47,7 +47,7 @@ export default async function ConversationPage({
     const claims = await verifyWorldUserJwt(token);
     worldUserId = claims.world_user_id;
   } catch {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   // Ownership check: pull the conversation + the two agents' user_ids in one

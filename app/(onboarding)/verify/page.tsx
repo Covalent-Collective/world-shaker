@@ -26,7 +26,7 @@ export default function VerifyPage(): React.ReactElement {
       if (res.ok) {
         setVerified(true);
         posthog.capture('verify_success');
-        router.push('/onboarding/intro');
+        router.push('/intro');
       } else {
         posthog.capture('verify_error', { reason: 'non_200', status: res.status });
         toast.error(t('verify.error_toast'));

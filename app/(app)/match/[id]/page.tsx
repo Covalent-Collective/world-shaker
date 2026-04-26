@@ -14,14 +14,14 @@ export default async function MatchPage({ params }: PageProps): Promise<React.Re
 
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!token) redirect('/onboarding/verify');
+  if (!token) redirect('/verify');
 
   let worldUserId: string;
   try {
     const claims = await verifyWorldUserJwt(token);
     worldUserId = claims.world_user_id;
   } catch {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   const db = getServiceClient();

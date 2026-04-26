@@ -17,7 +17,7 @@ export default function IntroPage(): React.JSX.Element {
 
   function handleComplete(): void {
     posthog.capture('onboarding_video_completed');
-    router.push('/onboarding/interview');
+    router.push('/interview');
   }
 
   return (

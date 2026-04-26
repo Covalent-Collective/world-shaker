@@ -12,8 +12,8 @@ export const dynamic = 'force-dynamic';
  * Authenticated home page (US-320).
  *
  * Server component decision tree:
- *   1. No/invalid JWT → redirect to /onboarding/verify
- *   2. No active agent → redirect to /onboarding/interview
+ *   1. No/invalid JWT → redirect to /verify
+ *   2. No active agent → redirect to /interview
  *   3. Match pending/accepted → CTA "Your encounter is ready"
  *   4. Conversation live → CTA "Watch live"
  *   5. Conversation completed, no match yet → "Generating report..." pending state
@@ -25,7 +25,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
   if (!token) {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   let worldUserId: string;
@@ -33,7 +33,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
     const claims = await verifyWorldUserJwt(token);
     worldUserId = claims.world_user_id;
   } catch {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   const db = getServiceClient();
@@ -42,7 +42,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
   // Also fetch interview_answers so we can verify the user finished onboarding.
   // First answer of the interview inserts an active agent row, but until the
   // interview_complete sentinel is set the user should still be sent back to
-  // /onboarding/interview rather than the home decision tree.
+  // /interview rather than the home decision tree.
   const { data: agentRow } = await db
     .from('agents')
     .select('id, interview_answers')
@@ -52,12 +52,12 @@ export default async function HomePage(): Promise<React.ReactElement> {
     .maybeSingle();
 
   if (!agentRow) {
-    redirect('/onboarding/interview');
+    redirect('/interview');
   }
 
   const interviewAnswers = (agentRow.interview_answers as Record<string, string> | null) ?? {};
   if (!interviewAnswers.interview_complete) {
-    redirect('/onboarding/interview');
+    redirect('/interview');
   }
 
   const agentId: string = agentRow.id;

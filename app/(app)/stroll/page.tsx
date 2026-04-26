@@ -17,7 +17,7 @@ export interface MatchCandidate {
  * Daily Stroll page (US-311 / US-312).
  *
  * Server component:
- *   1. Authenticates via ws_session JWT — redirects to /onboarding/verify if invalid.
+ *   1. Authenticates via ws_session JWT — redirects to /verify if invalid.
  *   2. Reads app_settings.streaming_paused via service client.
  *   3. Reads the user's daily quota via getDailyQuota.
  *   4. Calls match_candidates RPC (mode='stroll_proactive') for up to 10 results.
@@ -29,7 +29,7 @@ export default async function StrollPage(): Promise<React.ReactElement> {
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
   if (!token) {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   let worldUserId: string;
@@ -37,7 +37,7 @@ export default async function StrollPage(): Promise<React.ReactElement> {
     const claims = await verifyWorldUserJwt(token);
     worldUserId = claims.world_user_id;
   } catch {
-    redirect('/onboarding/verify');
+    redirect('/verify');
   }
 
   const t = await getT();

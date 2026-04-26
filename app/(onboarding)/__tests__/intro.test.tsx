@@ -56,7 +56,7 @@ describe('IntroPage', () => {
     });
     fireEvent.click(screen.getByText('intro.skip'));
     expect(mockCapture).toHaveBeenCalledWith('onboarding_video_completed');
-    expect(mockRouterPush).toHaveBeenCalledWith('/onboarding/interview');
+    expect(mockRouterPush).toHaveBeenCalledWith('/interview');
   });
 
   it('video onEnded fires posthog capture and router push', () => {
@@ -64,7 +64,7 @@ describe('IntroPage', () => {
     const video = document.querySelector('video') as HTMLVideoElement;
     fireEvent.ended(video);
     expect(mockCapture).toHaveBeenCalledWith('onboarding_video_completed');
-    expect(mockRouterPush).toHaveBeenCalledWith('/onboarding/interview');
+    expect(mockRouterPush).toHaveBeenCalledWith('/interview');
   });
 
   it('renders video with correct src', () => {

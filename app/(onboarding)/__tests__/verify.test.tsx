@@ -73,14 +73,14 @@ describe('VerifyPage', () => {
     expect(screen.getByText('verify.cta')).toBeInTheDocument();
   });
 
-  it('calls router.push("/onboarding/intro") on 200 response from /api/verify', async () => {
+  it('calls router.push("/intro") on 200 response from /api/verify', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
 
     render(<VerifyPage />);
     await userEvent.click(screen.getByTestId('idkit-success'));
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith('/onboarding/intro');
+      expect(mockPush).toHaveBeenCalledWith('/intro');
     });
   });
 
