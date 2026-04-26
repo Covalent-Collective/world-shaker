@@ -43,6 +43,7 @@ const dbState = {
   outcomeInserts: [] as unknown[],
   rpcCalls: [] as Array<{ fn: string; args: unknown }>,
   seedPoolActive: true,
+  userLanguagePref: 'ko' as 'ko' | 'en' | null,
 };
 
 function makeAgentsSelect(_cols: string): unknown {
@@ -100,6 +101,22 @@ vi.mock('@/lib/supabase/service', () => ({
           }),
         };
       }
+      if (table === 'users') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data:
+                    dbState.userLanguagePref === null
+                      ? null
+                      : { language_pref: dbState.userLanguagePref },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      }
       throw new Error(`unexpected table: ${table}`);
     },
   }),
@@ -147,6 +164,7 @@ describe('firstEncounter Inngest fn', () => {
     dbState.outcomeInserts = [];
     dbState.rpcCalls = [];
     dbState.seedPoolActive = true;
+    dbState.userLanguagePref = 'ko';
   });
 
   it('happy path: spawns conversation/start with is_first_encounter=true (no pair_key in payload)', async () => {
@@ -217,6 +235,30 @@ describe('firstEncounter Inngest fn', () => {
       properties: expect.objectContaining({ candidate_cohort: candidate_user }),
       hashProperties: ['candidate_cohort'],
     });
+  });
+
+  it("propagates users.language_pref='en' into conversation/start payload (i18n fix)", async () => {
+    dbState.userLanguagePref = 'en';
+    dbState.candidates = [{ candidate_user: 'user-en', score: 0.7 }];
+    dbState.candidateAgent = { id: 'agent-en', user_id: 'user-en' };
+    dbState.agent = { avatar_url: '/x.png', extracted_features: {} };
+
+    await handler(makeCtx({ user_id: 'user-en-1', agent_id: 'agent-en-1' }));
+
+    const sentData = stepSendEvent.mock.calls[0]?.[1]?.data as Record<string, unknown>;
+    expect(sentData.language).toBe('en');
+  });
+
+  it('falls back to en when users row is missing language_pref (English is product default)', async () => {
+    dbState.userLanguagePref = null;
+    dbState.candidates = [{ candidate_user: 'user-x', score: 0.7 }];
+    dbState.candidateAgent = { id: 'agent-x', user_id: 'user-x' };
+    dbState.agent = { avatar_url: '/x.png', extracted_features: {} };
+
+    await handler(makeCtx({ user_id: 'user-x-1', agent_id: 'agent-x-1' }));
+
+    const sentData = stepSendEvent.mock.calls[0]?.[1]?.data as Record<string, unknown>;
+    expect(sentData.language).toBe('en');
   });
 
   it('exits cleanly when no candidate is available (recovery will retry)', async () => {

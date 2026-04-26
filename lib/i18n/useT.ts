@@ -8,7 +8,7 @@ interface LangContextValue {
   lang: Lang;
 }
 
-const LangContext = createContext<LangContextValue>({ lang: 'ko' });
+const LangContext = createContext<LangContextValue>({ lang: 'en' });
 
 interface LangProviderProps {
   lang: Lang;

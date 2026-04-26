@@ -26,16 +26,16 @@ describe('parseLanguagePref', () => {
     expect(parseLanguagePref('en')).toBe('en');
   });
 
-  it('defaults to ko for null', () => {
-    expect(parseLanguagePref(null)).toBe('ko');
+  it('defaults to en for null', () => {
+    expect(parseLanguagePref(null)).toBe('en');
   });
 
-  it('defaults to ko for empty string', () => {
-    expect(parseLanguagePref('')).toBe('ko');
+  it('defaults to en for empty string', () => {
+    expect(parseLanguagePref('')).toBe('en');
   });
 
-  it('defaults to ko for unsupported language (fr)', () => {
-    expect(parseLanguagePref('fr-FR,fr;q=0.9')).toBe('ko');
+  it('defaults to en for unsupported language (fr)', () => {
+    expect(parseLanguagePref('fr-FR,fr;q=0.9')).toBe('en');
   });
 
   it('is case-insensitive (KO-KR)', () => {

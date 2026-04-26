@@ -196,6 +196,20 @@ export const firstEncounter = inngest.createFunction(
       return { pair_key: pairKey, agent_a_id: a, agent_b_id: b };
     });
 
+    // Inngest functions have no request context, so pull the user's locale
+    // from users.language_pref (verify route writes it from Accept-Language).
+    // Default to 'en' if the column is null/missing — English is the product
+    // default for unknown/unsupported locales.
+    const language = await step.run('resolve-language', async () => {
+      const supabase = getServiceClient();
+      const { data } = await supabase
+        .from('users')
+        .select('language_pref')
+        .eq('id', user_id)
+        .maybeSingle();
+      return data?.language_pref === 'ko' ? ('ko' as const) : ('en' as const);
+    });
+
     await step.sendEvent('send-conversation-start', {
       name: 'conversation/start',
       data: {
@@ -203,7 +217,7 @@ export const firstEncounter = inngest.createFunction(
         surface: 'dating' as const,
         agent_a_id,
         agent_b_id,
-        language: 'ko' as const,
+        language,
         is_first_encounter: true,
       },
     });
