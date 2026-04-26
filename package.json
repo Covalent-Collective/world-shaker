@@ -20,7 +20,9 @@
     "validate:hnsw": "tsx scripts/validate-hnsw-recall.ts",
     "smoke:conversation": "tsx scripts/smoke-conversation.ts",
     "inject:fault": "tsx scripts/inject-fault.ts",
-    "audit:outcome-events": "tsx scripts/audit-outcome-events.ts"
+    "audit:outcome-events": "tsx scripts/audit-outcome-events.ts",
+    "audit:posthog-events": "tsx scripts/audit-posthog-events.ts",
+    "eval:en-prompts": "tsx scripts/eval-en-prompts.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

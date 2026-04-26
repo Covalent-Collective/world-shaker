@@ -46,6 +46,46 @@ export async function captureServer(
 }
 
 /**
+ * Fire-and-forget capture that never throws. Use for analytics on hot paths
+ * where hashing failure or PostHog unavailability must not break the product.
+ *
+ * - Hashes worldUserId via captureServer (privacy invariant preserved)
+ * - Hashes any property values matching `hashProperties` keys via hashCohort
+ * - Catches and logs failures; does NOT propagate
+ * - Returns void; do NOT await for product correctness
+ */
+export async function captureServerSafe(
+  event: string,
+  opts: {
+    worldUserId: string;
+    properties?: Record<string, unknown>;
+    hashProperties?: string[]; // keys whose values must be hashed before send
+  },
+): Promise<void> {
+  try {
+    const ph = getPostHogServer();
+    if (!ph) return; // PostHog disabled — no-op
+
+    let properties: Record<string, unknown> = opts.properties ?? {};
+    if (opts.hashProperties && opts.hashProperties.length > 0) {
+      const hashed: Record<string, unknown> = { ...properties };
+      for (const key of opts.hashProperties) {
+        const value = hashed[key];
+        if (typeof value === 'string') {
+          hashed[key] = await hashCohort(value);
+        }
+      }
+      properties = hashed;
+    }
+
+    await captureServer(event, { worldUserId: opts.worldUserId, properties });
+  } catch (err) {
+    // Analytics must never fail the product flow.
+    console.warn('[posthog] captureServerSafe error', { event, err });
+  }
+}
+
+/**
  * Identify a server-side PostHog session using the cohort hash as distinct_id.
  * Wraps `setPosthogIdentity` from `lib/posthog/cohort.ts` with a PostHog Node
  * client that conforms to the expected identify interface.

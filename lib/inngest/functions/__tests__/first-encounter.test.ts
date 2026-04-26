@@ -26,6 +26,12 @@ vi.mock('@/lib/inngest/client', () => ({
 vi.mock('@/lib/avatar/generate', () => ({ generateAvatar }));
 vi.mock('@/lib/quota/daily', () => ({ getDailyQuota }));
 
+// PostHog server mock — captureServerSafe is fire-and-forget; calls recorded for assertion
+const mockCaptureServerSafe = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/lib/posthog/server', () => ({
+  captureServerSafe: (...args: unknown[]) => mockCaptureServerSafe(...args),
+}));
+
 // ---------------------------------------------------------------------------
 // Supabase service-client mock.
 // ---------------------------------------------------------------------------
@@ -130,6 +136,7 @@ describe('firstEncounter Inngest fn', () => {
     stepSendEvent.mockClear();
     generateAvatar.mockClear();
     getDailyQuota.mockClear();
+    mockCaptureServerSafe.mockClear();
     getDailyQuota.mockResolvedValue({ used: 0, max: 4, nextResetAt: new Date() });
     dbState.candidates = [];
     dbState.candidateAgent = null;
@@ -199,6 +206,14 @@ describe('firstEncounter Inngest fn', () => {
     const sentData = stepSendEvent.mock.calls[0]?.[1]?.data as Record<string, unknown>;
     expect(sentData).not.toHaveProperty('pair_key');
     expect(sentData).not.toHaveProperty('first_encounter');
+
+    // captureServerSafe fired with raw candidate_user_id as candidate_cohort
+    // (hashing delegated inside captureServerSafe, not done inline)
+    expect(mockCaptureServerSafe).toHaveBeenCalledWith('first_encounter_spawned', {
+      worldUserId: 'user-aaa',
+      properties: expect.objectContaining({ candidate_cohort: candidate_user }),
+      hashProperties: ['candidate_cohort'],
+    });
   });
 
   it('exits cleanly when no candidate is available (recovery will retry)', async () => {

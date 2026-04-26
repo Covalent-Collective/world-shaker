@@ -56,6 +56,10 @@ export async function POST(req: Request): Promise<Response> {
   });
 
   if (!rl.ok) {
+    void captureServer('rate_limit_hit', {
+      worldUserId,
+      properties: { bucket: 'stroll_spawn', retryAfterSeconds: rl.retryAfterSeconds },
+    });
     return NextResponse.json(
       { error: 'rate_limited', retryAfterSeconds: rl.retryAfterSeconds },
       { status: 429 },
@@ -76,6 +80,10 @@ export async function POST(req: Request): Promise<Response> {
   // 1. Daily quota
   const quota = await getDailyQuota(worldUserId);
   if (quota.used >= quota.max) {
+    void captureServer('quota_blocked', {
+      worldUserId,
+      properties: { used: quota.used, max: quota.max, source: 'stroll_spawn' },
+    });
     return NextResponse.json(
       { error: 'quota_exceeded', reason: 'quota_exceeded' },
       { status: 429 },

@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 
 import AgentFarewell from '@/components/match/AgentFarewell';
 import StarterCard from '@/components/match/StarterCard';
+import VerifiedHumanBadge from '@/components/world/VerifiedHumanBadge';
 import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
 
@@ -41,6 +42,9 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
 
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center p-6 space-y-8">
+      <div className="absolute top-6 right-6">
+        <VerifiedHumanBadge variant="compact" />
+      </div>
       <AgentFarewell />
 
       {starters.length > 0 && (

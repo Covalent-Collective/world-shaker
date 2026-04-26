@@ -3,7 +3,7 @@
 ## world-shaker-ux-v1 — 2026-04-26
 
 - [ ] **Track B fidelity for v0** — Is "Daily Stroll cards" an acceptable approximation of the Sims-style world for v0, or does the product owner require visible "stroll" motion (parallax, ambient agents)? — Affects Phase 3 scope and timeline.
-- [ ] **Avatar regeneration policy** — One-shot at v0 (recommended) or allow one regeneration? — Affects schema (`agents.avatar_generated_at` immutable vs. counter) and UX in settings.
+- [x] **Avatar regeneration policy** — RESOLVED 2026-04-26: one-shot at v0 per v4 plan recommendation. `avatar_generated_at` is immutable after first write; `generateAvatar()` short-circuits on re-call and returns existing URL without overwriting. Regeneration deferred to v1.1 if user complaints surface. Implemented in `lib/avatar/generate.ts` (US-501).
 - [ ] **Cross-language matching opt-in** — Defer to v1 (recommended) or include as toggle in v0? — Affects matching SQL and language-stickiness eval.
 - [ ] **Daily quota reset time** — UTC, user-local from MiniKit, or user-local from new `users.timezone` column? — Affects Step 1.5 quota helper and Step 4.4 enforcement copy.
 - [ ] **First-message starter generation timing** — Pre-generate at `match.created` (recommended, +2-3s saved on success screen) or on-demand at mutual? — Affects Step 3.9 and prompt token budget.

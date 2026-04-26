@@ -93,6 +93,36 @@ describe('getT', () => {
   });
 });
 
+describe('copy tone — arcade-gamification anti-patterns', () => {
+  const BANNED_WORDS = ['unlock', 'reward', 'streak', 'bonus', 'win', 'level up'];
+
+  it('KR dictionary contains no arcade-gamification words', () => {
+    const offending: string[] = [];
+    for (const [key, value] of Object.entries(messages.ko)) {
+      const lower = value.toLowerCase();
+      for (const word of BANNED_WORDS) {
+        if (lower.includes(word)) {
+          offending.push(`ko["${key}"] contains "${word}": "${value}"`);
+        }
+      }
+    }
+    expect(offending).toEqual([]);
+  });
+
+  it('EN dictionary contains no arcade-gamification words', () => {
+    const offending: string[] = [];
+    for (const [key, value] of Object.entries(messages.en)) {
+      const lower = value.toLowerCase();
+      for (const word of BANNED_WORDS) {
+        if (lower.includes(word)) {
+          offending.push(`en["${key}"] contains "${word}": "${value}"`);
+        }
+      }
+    }
+    expect(offending).toEqual([]);
+  });
+});
+
 describe('useT', () => {
   it('returns ko translations from LangProvider with lang=ko', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
