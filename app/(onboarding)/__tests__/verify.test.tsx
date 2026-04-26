@@ -29,34 +29,27 @@ vi.mock('@/components/world/VerifiedHumanBadge', () => ({
   default: () => <span data-testid="verified-badge" />,
 }));
 
-// IDKitRequestWidget mock: renders a button that calls onSuccess with a fake proof
-vi.mock('@worldcoin/idkit', () => ({
-  orbLegacy: () => ({ type: 'OrbLegacy' }),
-  IDKitRequestWidget: ({
-    onSuccess,
-    onError,
-  }: {
-    onSuccess: (result: { proof: string }) => void;
-    onError: (code: string) => void;
-    open: boolean;
-    onOpenChange: (v: boolean) => void;
-    app_id: string;
-    action: string;
-  }) => (
-    <div>
-      <button
-        type="button"
-        data-testid="idkit-success"
-        onClick={() => onSuccess({ proof: 'test_proof' })}
-      >
-        Mock Success
-      </button>
-      <button type="button" data-testid="idkit-error" onClick={() => onError('generic_error')}>
-        Mock Error
-      </button>
-    </div>
-  ),
+// MiniKit mock — `isInstalled` and `commandsAsync.verify` are the only entry
+// points the page touches. Each test rewrites the `verify` mock to simulate
+// a different finalPayload outcome.
+const mockVerify = vi.fn();
+vi.mock('@worldcoin/minikit-js', () => ({
+  MiniKit: {
+    isInstalled: () => true,
+    commandsAsync: {
+      verify: (...args: unknown[]) => mockVerify(...args),
+    },
+  },
+  VerificationLevel: { Orb: 'orb', Device: 'device' },
 }));
+
+const SUCCESS_PAYLOAD = {
+  status: 'success' as const,
+  proof: 'test_proof',
+  merkle_root: '0xroot',
+  nullifier_hash: '0xnull',
+  verification_level: 'orb',
+};
 
 // --- tests ---
 
@@ -74,10 +67,11 @@ describe('VerifyPage', () => {
   });
 
   it('calls router.push("/intro") on 200 response from /api/verify', async () => {
+    mockVerify.mockResolvedValue({ finalPayload: SUCCESS_PAYLOAD });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
 
     render(<VerifyPage />);
-    await userEvent.click(screen.getByTestId('idkit-success'));
+    await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith('/intro');
@@ -85,11 +79,12 @@ describe('VerifyPage', () => {
   });
 
   it('shows error toast on non-200 response from /api/verify', async () => {
+    mockVerify.mockResolvedValue({ finalPayload: SUCCESS_PAYLOAD });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
     const { toast } = await import('sonner');
 
     render(<VerifyPage />);
-    await userEvent.click(screen.getByTestId('idkit-success'));
+    await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
@@ -97,12 +92,15 @@ describe('VerifyPage', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('shows error toast when IDKit calls onError', async () => {
+  it('shows error toast when MiniKit returns finalPayload.status === "error"', async () => {
+    mockVerify.mockResolvedValue({
+      finalPayload: { status: 'error', error_code: 'user_rejected' },
+    });
     vi.stubGlobal('fetch', vi.fn());
     const { toast } = await import('sonner');
 
     render(<VerifyPage />);
-    await userEvent.click(screen.getByTestId('idkit-error'));
+    await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
