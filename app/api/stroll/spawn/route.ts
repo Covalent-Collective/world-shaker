@@ -21,8 +21,8 @@ const Body = z.object({
  * 'conversation/start' Inngest event and records an outcome_event of type
  * 'viewed' (counts toward daily quota).
  *
- * Returns 200 { conversation_id_pending: true } — the client navigates to
- * /conversation/pending and polls for the live conversation row.
+ * Returns 200 { conversation_id: '<uuid>' } — the client navigates directly
+ * to /conversation/<uuid> using the pre-allocated conversation id.
  *
  * Auth: ws_session JWT (custom JWT — not Supabase Auth).
  * Rate-limit: 10 calls per 60 s per user (bucket 'stroll_spawn').
