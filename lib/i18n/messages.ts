@@ -74,6 +74,12 @@ const ko = {
   'encounter.scenelabel': '하나의 테이블',
   'encounter.fin': '— 막을 내립니다 —',
   'encounter.abandoned': '대화가 잠시 멈췄습니다.',
+  'encounter.endpopup.tag': 'WORLD SHAKER',
+  'encounter.endpopup.title': '둘이 어떻게 통했는지\n보셨죠?',
+  'encounter.endpopup.body': '에이전트들의 첫 만남은 끝났어요.\n이제 직접 이야기 나눠볼 차례예요.',
+  'encounter.endpopup.cta_named': '{name}님과 대화해보기',
+  'encounter.endpopup.cta_unnamed': '이 사람과 대화해보기',
+  'encounter.endpopup.dismiss': '나중에',
 } as const satisfies Record<MessageKey, string>;
 
 const en = {
@@ -150,6 +156,13 @@ const en = {
   'encounter.scenelabel': 'One Table',
   'encounter.fin': '— curtain —',
   'encounter.abandoned': 'The conversation paused.',
+  'encounter.endpopup.tag': 'WORLD SHAKER',
+  'encounter.endpopup.title': 'Saw how they clicked?',
+  'encounter.endpopup.body':
+    "Their agents have finished talking.\nNow it's your turn to meet for real.",
+  'encounter.endpopup.cta_named': 'Message {name}',
+  'encounter.endpopup.cta_unnamed': 'Message this person',
+  'encounter.endpopup.dismiss': 'Later',
 } as const satisfies Record<MessageKey, string>;
 
 export const messages = { ko, en } as const satisfies Record<Lang, Record<MessageKey, string>>;

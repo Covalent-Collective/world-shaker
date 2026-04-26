@@ -129,22 +129,14 @@ export default async function HomePage(): Promise<React.ReactElement> {
     );
   }
 
-  // Case 3: Conversation completed but no match yet → generating report
+  // Case 3: Conversation completed but no match yet → route the user back
+  // to the encounter viewer so they can replay (and finish via the
+  // end-of-encounter CTA). The old "Generating report…" interstitial stalls
+  // forever when the report-generation pipeline hasn't created a match row,
+  // and forces the user to wait through a state they can't act on. Routing
+  // straight to /conversation/[id] keeps the loop closed end-to-end.
   if (convRow?.status === 'completed' && !matchRow) {
-    return (
-      <main className="min-h-dvh flex items-center justify-center p-6">
-        <div className="max-w-md text-center space-y-4">
-          <p className="text-text-3 text-xs tracking-widest uppercase font-semibold">
-            World Shaker
-          </p>
-          <h1 className="font-serif text-4xl leading-tight">Generating report&hellip;</h1>
-          <p className="text-text-2">
-            Your agents have finished their conversation. We&apos;re preparing your encounter
-            report.
-          </p>
-        </div>
-      </main>
-    );
+    redirect(`/conversation/${convRow.id}`);
   }
 
   // Case 4: No conversation, no match → preparing first encounter + recovery probe.
