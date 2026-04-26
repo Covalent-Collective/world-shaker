@@ -52,19 +52,17 @@ function isLang(value: string | undefined): value is Lang {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = await cookies();
-  const rawLang = cookieStore.get('lang')?.value;
-  // Priority: explicit `lang` cookie (set by /api/user/language) → Accept-Language
-  // header (device/browser locale) → 'en' default (parseLanguagePref). English
-  // is the product default for unknown locales; ko users still get ko via the
-  // header path.
-  let lang: Lang;
-  if (isLang(rawLang)) {
-    lang = rawLang;
-  } else {
-    const headerStore = await headers();
-    lang = parseLanguagePref(headerStore.get('accept-language'));
-  }
+  // Demo override: force English regardless of any pre-existing `lang`
+  // cookie or device Accept-Language. Older test sessions set `lang=ko`
+  // via /api/user/language, which sticks across reloads. Until we ship
+  // an in-app language switcher, English is the only locale we present.
+  // Drop this override once the switcher exists and restore the
+  // cookie-then-header detection (preserved below for reference).
+  await cookies();
+  await headers();
+  void isLang;
+  void parseLanguagePref;
+  const lang: Lang = 'en';
 
   return (
     <html
