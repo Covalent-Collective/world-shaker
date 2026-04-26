@@ -49,9 +49,10 @@ export default async function ConversationPage({
     redirect('/verify');
   }
 
-  // Ownership check: pull the conversation + the two agents' user_ids in one
-  // query, then assert the JWT user owns one of them. Using the service
-  // client because conversations is service-role-only.
+  // Ownership check: pull the conversation + the two agents' user_ids and
+  // interview_answers in one round-trip. The interview_answers carry the
+  // partner's q0_name (set during onboarding), which the encounter end-of-
+  // playback popup uses for its CTA copy.
   const supabase = getServiceClient();
   const { data: conv, error } = await supabase
     .from('conversations')
@@ -65,12 +66,23 @@ export default async function ConversationPage({
 
   const { data: agents, error: agentsError } = await supabase
     .from('agents')
-    .select('id, user_id')
+    .select('id, user_id, interview_answers')
     .in('id', [conv.agent_a_id, conv.agent_b_id]);
 
   if (agentsError || !agents || !agents.some((a) => a.user_id === worldUserId)) {
     notFound();
   }
+
+  // Partner = the agent NOT owned by the current user. Their q0_name
+  // becomes the popup's CTA name (e.g. "Sue와 대화해보기"). Falls back to
+  // null when the partner agent pre-dates the q0_name interview question.
+  const partner = agents.find((a) => a.user_id !== worldUserId);
+  const partnerAnswers = (partner?.interview_answers ?? null) as Record<string, unknown> | null;
+  const rawPartnerName = partnerAnswers?.['q0_name'];
+  const partnerName =
+    typeof rawPartnerName === 'string' && rawPartnerName.trim().length > 0
+      ? rawPartnerName.trim()
+      : null;
 
   const parsed = lastEventIdParam !== undefined ? Number(lastEventIdParam) : 0;
   const lastEventId = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
@@ -80,6 +92,7 @@ export default async function ConversationPage({
       conversationId={conv.id}
       initialStatus={conv.status as ConversationStatus}
       initialLastEventId={lastEventId}
+      partnerName={partnerName}
     />
   );
 }

@@ -62,4 +62,10 @@ export type MessageKey =
   | 'encounter.header'
   | 'encounter.scenelabel'
   | 'encounter.fin'
-  | 'encounter.abandoned';
+  | 'encounter.abandoned'
+  | 'encounter.endpopup.tag'
+  | 'encounter.endpopup.title'
+  | 'encounter.endpopup.body'
+  | 'encounter.endpopup.cta_named'
+  | 'encounter.endpopup.cta_unnamed'
+  | 'encounter.endpopup.dismiss';
