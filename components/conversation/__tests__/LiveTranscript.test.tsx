@@ -89,13 +89,13 @@ describe('LiveTranscript', () => {
     expect(screen.queryByText('dup')).not.toBeInTheDocument();
   });
 
-  it('renders FailureOverlay when a failed event fires', () => {
+  it('renders FailureOverlay when a complete event fires with status=failed', () => {
     render(<LiveTranscript conversationId="conv-1" initialStatus="live" initialLastEventId={0} />);
 
     const source = FakeEventSource.instances[0];
 
     act(() => {
-      source.dispatch('failed', '');
+      source.dispatch('complete', JSON.stringify({ status: 'failed' }));
     });
 
     // FailureOverlay button uses the same i18n key for the title and the
@@ -112,7 +112,7 @@ describe('LiveTranscript', () => {
     const source = FakeEventSource.instances[0];
 
     act(() => {
-      source.dispatch('complete', '');
+      source.dispatch('complete', JSON.stringify({ status: 'completed' }));
     });
 
     expect(screen.getByText('conversation.complete')).toBeInTheDocument();

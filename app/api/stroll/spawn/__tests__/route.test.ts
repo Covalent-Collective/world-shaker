@@ -57,7 +57,8 @@ const DEFAULT_CLAIMS = {
   language_pref: 'ko' as const,
 };
 
-const CANDIDATE_AGENT_ID = 'ccccdddd-cccc-4ccc-8ccc-cccccccccc02';
+const CANDIDATE_USER_ID = 'ccccdddd-cccc-4ccc-8ccc-cccccccccc02';
+const CANDIDATE_AGENT_ID = 'ddddeeee-dddd-4ddd-8ddd-dddddddddd03';
 const OWN_AGENT_ID = 'aaaabbbb-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 function makeRequest(body: unknown, cookieValue?: string): Request {
@@ -99,7 +100,7 @@ describe('POST /api/stroll/spawn', () => {
     const req = new Request('http://localhost/api/stroll/spawn', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ candidate_agent_id: CANDIDATE_AGENT_ID }),
+      body: JSON.stringify({ candidate_user_id: CANDIDATE_USER_ID }),
     });
 
     const res = await POST(req);
@@ -110,7 +111,7 @@ describe('POST /api/stroll/spawn', () => {
 
   it('returns 401 when JWT verification fails', async () => {
     mockVerifyWorldUserJwt.mockRejectedValue(new Error('jwt_invalid'));
-    const req = makeRequest({ candidate_agent_id: CANDIDATE_AGENT_ID }, 'bad-token');
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'bad-token');
 
     const res = await POST(req);
     expect(res.status).toBe(401);
@@ -129,7 +130,7 @@ describe('POST /api/stroll/spawn', () => {
     const settingsChain = buildChain({ data: { streaming_paused: false }, error: null });
     mockFrom.mockReturnValue(settingsChain);
 
-    const req = makeRequest({ candidate_agent_id: CANDIDATE_AGENT_ID }, 'valid-token');
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'valid-token');
     const res = await POST(req);
 
     expect(res.status).toBe(429);
@@ -147,7 +148,7 @@ describe('POST /api/stroll/spawn', () => {
     const settingsChain = buildChain({ data: { streaming_paused: true }, error: null });
     mockFrom.mockReturnValue(settingsChain);
 
-    const req = makeRequest({ candidate_agent_id: CANDIDATE_AGENT_ID }, 'valid-token');
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'valid-token');
     const res = await POST(req);
 
     expect(res.status).toBe(503);
@@ -166,34 +167,39 @@ describe('POST /api/stroll/spawn', () => {
     const settingsChain = buildChain({ data: { streaming_paused: false }, error: null });
 
     // agents → own active agent
-    const agentChain = buildChain({ data: { id: OWN_AGENT_ID }, error: null });
+    const ownAgentChain = buildChain({ data: { id: OWN_AGENT_ID }, error: null });
+
+    // agents → candidate's active agent
+    const candidateAgentChain = buildChain({ data: { id: CANDIDATE_AGENT_ID }, error: null });
 
     // outcome_events insert
     const insertChain = buildChain({ error: null });
 
-    // match_candidates RPC returns our candidate
+    // match_candidates RPC returns our candidate (keyed by user id)
     mockRpc.mockResolvedValue({
-      data: [{ candidate_user: CANDIDATE_AGENT_ID }],
+      data: [{ candidate_user: CANDIDATE_USER_ID }],
       error: null,
     });
 
     // from() call order:
     //  1. app_settings (select streaming_paused)
-    //  2. agents (select id)
-    //  3. outcome_events (insert)
+    //  2. agents (select id — own agent)
+    //  3. agents (select id — candidate agent)
+    //  4. outcome_events (insert)
     mockFrom
       .mockReturnValueOnce(settingsChain)
-      .mockReturnValueOnce(agentChain)
+      .mockReturnValueOnce(ownAgentChain)
+      .mockReturnValueOnce(candidateAgentChain)
       .mockReturnValueOnce(insertChain);
 
-    const req = makeRequest({ candidate_agent_id: CANDIDATE_AGENT_ID }, 'valid-token');
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'valid-token');
     const res = await POST(req);
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.conversation_id_pending).toBe(true);
 
-    // Inngest event was sent
+    // Inngest event was sent with resolved agent ids (not user ids)
     expect(mockInngestSend).toHaveBeenCalledOnce();
     expect(mockInngestSend).toHaveBeenCalledWith({
       name: 'conversation/start',

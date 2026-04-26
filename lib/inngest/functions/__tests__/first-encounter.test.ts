@@ -6,12 +6,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // reference must be inside vi.hoisted().
 // ---------------------------------------------------------------------------
 
-const { inngestSend, generateAvatar } = vi.hoisted(() => ({
-  inngestSend: vi.fn().mockResolvedValue({ ids: ['evt_test'] }),
+const { stepSendEvent, generateAvatar, getDailyQuota } = vi.hoisted(() => ({
+  stepSendEvent: vi.fn().mockResolvedValue({ ids: ['evt_test'] }),
   generateAvatar: vi.fn(async () => ({
     url: '/avatars/placeholder/abc.png',
     placeholder: true,
   })),
+  getDailyQuota: vi.fn().mockResolvedValue({ used: 0, max: 4, nextResetAt: new Date() }),
 }));
 
 vi.mock('@/lib/inngest/client', () => ({
@@ -19,68 +20,23 @@ vi.mock('@/lib/inngest/client', () => ({
     createFunction: (_config: unknown, handler: (ctx: unknown) => Promise<unknown>) => ({
       handler,
     }),
-    send: inngestSend,
   },
 }));
 
 vi.mock('@/lib/avatar/generate', () => ({ generateAvatar }));
+vi.mock('@/lib/quota/daily', () => ({ getDailyQuota }));
 
 // ---------------------------------------------------------------------------
 // Supabase service-client mock.
 // ---------------------------------------------------------------------------
 
-interface MatchesRow {
-  id: string;
-  user_id: string;
-  candidate_user_id: string;
-  origin: string;
-  first_encounter: boolean;
-  created_at: string;
-}
-
 const dbState = {
   candidates: [] as Array<{ candidate_user: string; score: number }>,
   candidateAgent: null as { id: string; user_id: string } | null,
   agent: null as { avatar_url: string | null; extracted_features: Record<string, unknown> } | null,
-  matchesRow: null as MatchesRow | null,
-  updatedMatches: [] as Array<{ id: string; first_encounter: boolean }>,
+  outcomeInserts: [] as unknown[],
   rpcCalls: [] as Array<{ fn: string; args: unknown }>,
 };
-
-function makeMatchesSelect(): unknown {
-  const filters: Record<string, unknown> = {};
-  const builder = {
-    eq(col: string, val: unknown) {
-      filters[col] = val;
-      return builder;
-    },
-    order() {
-      return builder;
-    },
-    limit() {
-      return builder;
-    },
-    maybeSingle() {
-      if (dbState.matchesRow) {
-        return Promise.resolve({ data: { id: dbState.matchesRow.id }, error: null });
-      }
-      return Promise.resolve({ data: null, error: null });
-    },
-  };
-  return builder;
-}
-
-function makeMatchesUpdate(payload: { first_encounter: boolean }): unknown {
-  return {
-    eq(_col: string, val: string) {
-      dbState.updatedMatches.push({ id: val, first_encounter: payload.first_encounter });
-      if (dbState.matchesRow && dbState.matchesRow.id === val) {
-        dbState.matchesRow.first_encounter = payload.first_encounter;
-      }
-      return Promise.resolve({ data: null, error: null });
-    },
-  };
-}
 
 function makeAgentsSelect(_cols: string): unknown {
   const filters: Record<string, unknown> = {};
@@ -92,7 +48,7 @@ function makeAgentsSelect(_cols: string): unknown {
     maybeSingle() {
       // Distinguish: candidate-agent lookup uses user_id+status; primary-agent
       // lookup uses id alone.
-      if (filters.id) {
+      if (filters['id']) {
         return Promise.resolve({ data: dbState.agent, error: null });
       }
       return Promise.resolve({ data: dbState.candidateAgent, error: null });
@@ -116,10 +72,12 @@ vi.mock('@/lib/supabase/service', () => ({
           select: (cols: string) => makeAgentsSelect(cols),
         };
       }
-      if (table === 'matches') {
+      if (table === 'outcome_events') {
         return {
-          select: () => makeMatchesSelect(),
-          update: (payload: { first_encounter: boolean }) => makeMatchesUpdate(payload),
+          insert(row: unknown) {
+            dbState.outcomeInserts.push(row);
+            return Promise.resolve({ data: null, error: null });
+          },
         };
       }
       throw new Error(`unexpected table: ${table}`);
@@ -137,12 +95,13 @@ import { firstEncounter } from '../first-encounter';
 const handler = (firstEncounter as unknown as { handler: (ctx: unknown) => Promise<unknown> })
   .handler;
 
-// Minimal `step.run` shim — runs callbacks immediately.
+// Minimal step shim — runs callbacks immediately; sendEvent delegates to mock.
 function makeCtx(eventData: { user_id: string; agent_id: string }) {
   return {
     event: { name: 'agent.activated', data: eventData },
     step: {
       run: async <T>(_id: string, fn: () => Promise<T>): Promise<T> => fn(),
+      sendEvent: stepSendEvent,
     },
     logger: { info: () => {}, error: () => {}, warn: () => {} },
   };
@@ -154,17 +113,18 @@ function makeCtx(eventData: { user_id: string; agent_id: string }) {
 
 describe('firstEncounter Inngest fn', () => {
   beforeEach(() => {
-    inngestSend.mockClear();
+    stepSendEvent.mockClear();
     generateAvatar.mockClear();
+    getDailyQuota.mockClear();
+    getDailyQuota.mockResolvedValue({ used: 0, max: 4, nextResetAt: new Date() });
     dbState.candidates = [];
     dbState.candidateAgent = null;
     dbState.agent = null;
-    dbState.matchesRow = null;
-    dbState.updatedMatches = [];
+    dbState.outcomeInserts = [];
     dbState.rpcCalls = [];
   });
 
-  it('happy path: spawns conversation/start with deterministic pair_key and marks matches.first_encounter', async () => {
+  it('happy path: spawns conversation/start with is_first_encounter=true (no pair_key in payload)', async () => {
     const agent_id = 'agent-aaa';
     const candidate_user = 'user-bbb';
     const candidate_agent_id = 'agent-bbb';
@@ -172,24 +132,18 @@ describe('firstEncounter Inngest fn', () => {
     dbState.candidates = [{ candidate_user, score: 0.91 }];
     dbState.candidateAgent = { id: candidate_agent_id, user_id: candidate_user };
     dbState.agent = { avatar_url: null, extracted_features: { tone: 'warm' } };
-    dbState.matchesRow = {
-      id: 'match-1',
-      user_id: 'user-aaa',
-      candidate_user_id: candidate_user,
-      origin: 'system_generated',
-      first_encounter: false,
-      created_at: new Date().toISOString(),
-    };
 
     const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id }))) as {
       spawned: boolean;
       pair_key: string;
-      first_encounter_marked: boolean;
-      match_id: string | null;
+      agent_a_id: string;
+      agent_b_id: string;
+      candidate_user_id: string;
     };
 
     expect(result.spawned).toBe(true);
-    // Deterministic pair_key: lexicographic sort joined by '|'.
+
+    // Deterministic pair_key in return value.
     const expectedPair =
       agent_id < candidate_agent_id
         ? `${agent_id}|${candidate_agent_id}`
@@ -202,25 +156,26 @@ describe('firstEncounter Inngest fn', () => {
       extracted_features: { tone: 'warm' },
     });
 
-    // conversation/start event sent with both agents + pair_key.
-    expect(inngestSend).toHaveBeenCalledWith(
+    // conversation/start sent via step.sendEvent with is_first_encounter=true.
+    // pair_key must NOT be in the payload (Phase 2 ignores it; omitting keeps payload clean).
+    expect(stepSendEvent).toHaveBeenCalledWith(
+      'send-conversation-start',
       expect.objectContaining({
         name: 'conversation/start',
         data: expect.objectContaining({
           user_id: 'user-aaa',
           agent_a_id: agent_id,
           agent_b_id: candidate_agent_id,
-          pair_key: expectedPair,
           surface: 'dating',
-          first_encounter: true,
+          is_first_encounter: true,
         }),
       }),
     );
 
-    // matches row was stamped first_encounter=true.
-    expect(result.first_encounter_marked).toBe(true);
-    expect(result.match_id).toBe('match-1');
-    expect(dbState.updatedMatches).toContainEqual({ id: 'match-1', first_encounter: true });
+    // pair_key must NOT be sent in the conversation/start payload.
+    const sentData = stepSendEvent.mock.calls[0]?.[1]?.data as Record<string, unknown>;
+    expect(sentData).not.toHaveProperty('pair_key');
+    expect(sentData).not.toHaveProperty('first_encounter');
   });
 
   it('exits cleanly when no candidate is available (recovery will retry)', async () => {
@@ -233,7 +188,7 @@ describe('firstEncounter Inngest fn', () => {
 
     expect(result.spawned).toBe(false);
     expect(result.reason).toBe('no_candidate');
-    expect(inngestSend).not.toHaveBeenCalled();
+    expect(stepSendEvent).not.toHaveBeenCalled();
     expect(generateAvatar).not.toHaveBeenCalled();
   });
 
@@ -241,24 +196,39 @@ describe('firstEncounter Inngest fn', () => {
     dbState.candidates = [{ candidate_user: 'user-c', score: 0.5 }];
     dbState.candidateAgent = { id: 'agent-c', user_id: 'user-c' };
     dbState.agent = { avatar_url: '/already/here.png', extracted_features: {} };
-    dbState.matchesRow = {
-      id: 'm2',
-      user_id: 'u',
-      candidate_user_id: 'user-c',
-      origin: 'system_generated',
-      first_encounter: false,
-      created_at: new Date().toISOString(),
-    };
 
     await handler(makeCtx({ user_id: 'u', agent_id: 'agent-aa' }));
 
     expect(generateAvatar).not.toHaveBeenCalled();
-    expect(inngestSend).toHaveBeenCalledTimes(1);
+    expect(stepSendEvent).toHaveBeenCalledTimes(1);
   });
 
   it('throws when event payload is missing required fields', async () => {
     await expect(handler(makeCtx({ user_id: '', agent_id: '' }))).rejects.toThrow(
       /missing user_id or agent_id/,
     );
+  });
+
+  it('inserts wont_connect outcome and returns early when daily quota is exceeded', async () => {
+    getDailyQuota.mockResolvedValue({ used: 4, max: 4, nextResetAt: new Date() });
+
+    const result = (await handler(makeCtx({ user_id: 'user-quota', agent_id: 'agent-quota' }))) as {
+      spawned: boolean;
+      reason?: string;
+    };
+
+    expect(result.spawned).toBe(false);
+    expect(result.reason).toBe('daily_quota_exceeded');
+
+    // No conversation/start event emitted.
+    expect(stepSendEvent).not.toHaveBeenCalled();
+
+    // wont_connect outcome_event inserted.
+    expect(dbState.outcomeInserts).toHaveLength(1);
+    expect(dbState.outcomeInserts[0]).toMatchObject({
+      user_id: 'user-quota',
+      event_type: 'wont_connect',
+      source_screen: 'first-encounter',
+    });
   });
 });

@@ -22,7 +22,7 @@ interface SpawnResponse {
  * Client shell for the Daily Stroll page.
  *
  * Renders the CardStack and handles the tap-to-spawn flow:
- *   1. POST /api/stroll/spawn with { candidate_agent_id }.
+ *   1. POST /api/stroll/spawn with { candidate_user_id }.
  *   2. On 200, navigate to the conversation (or pending route).
  *   3. On error, show a toast.
  */
@@ -33,14 +33,14 @@ export default function StrollClient({
   const router = useRouter();
   const [loading, setLoading] = React.useState<boolean>(false);
 
-  async function handleTap(candidateAgentId: string): Promise<void> {
+  async function handleTap(candidateUserId: string): Promise<void> {
     if (loading) return;
     setLoading(true);
     try {
       const res = await fetch('/api/stroll/spawn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_agent_id: candidateAgentId }),
+        body: JSON.stringify({ candidate_user_id: candidateUserId }),
       });
 
       const data = (await res.json()) as SpawnResponse;

@@ -32,8 +32,8 @@ interface LiveTranscriptProps {
  *
  * Events:
  *   - 'turn'     → JSON.parse(payload) as Turn → append (de-duped by index).
- *   - 'failed'   → mark status failed → render <FailureOverlay />.
- *   - 'complete' → mark status completed → close stream.
+ *   - 'complete' → JSON.parse(payload) as { status: 'completed'|'failed'|'abandoned' }
+ *                  → set status accordingly → close stream.
  */
 export default function LiveTranscript({
   conversationId,
@@ -72,24 +72,28 @@ export default function LiveTranscript({
       }
     };
 
-    const handleComplete = () => {
-      setStatus('completed');
-      source.close();
-    };
-
-    const handleFailed = () => {
-      setStatus('failed');
+    const handleComplete = (ev: MessageEvent<string>) => {
+      try {
+        const data = JSON.parse(ev.data) as { status: string };
+        if (data.status === 'failed') {
+          setStatus('failed');
+        } else if (data.status === 'abandoned') {
+          setStatus('abandoned');
+        } else {
+          setStatus('completed');
+        }
+      } catch {
+        setStatus('completed');
+      }
       source.close();
     };
 
     source.addEventListener('turn', handleTurn);
     source.addEventListener('complete', handleComplete);
-    source.addEventListener('failed', handleFailed);
 
     return () => {
       source.removeEventListener('turn', handleTurn);
       source.removeEventListener('complete', handleComplete);
-      source.removeEventListener('failed', handleFailed);
       source.close();
       sourceRef.current = null;
     };

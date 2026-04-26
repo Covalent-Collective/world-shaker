@@ -11,7 +11,7 @@ import { inngest } from '@/lib/inngest/client';
 export const runtime = 'nodejs';
 
 const Body = z.object({
-  candidate_agent_id: z.string().uuid(),
+  candidate_user_id: z.string().uuid(),
 });
 
 /**
@@ -67,7 +67,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
 
-  const { candidate_agent_id } = body.data;
+  const { candidate_user_id } = body.data;
   const supabase = getServiceClient();
 
   // ── Pre-checks ────────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const candidateList = Array.isArray(candidates) ? candidates : [];
   const isValidCandidate = candidateList.some(
-    (c: { candidate_user: string }) => c.candidate_user === candidate_agent_id,
+    (c: { candidate_user: string }) => c.candidate_user === candidate_user_id,
   );
 
   if (!isValidCandidate) {
@@ -126,11 +126,26 @@ export async function POST(req: Request): Promise<Response> {
 
   const ownAgentId: string = agentRow.id;
 
+  // ── Look up candidate's active agent ─────────────────────────────────────
+  const { data: candidateAgentRow, error: candidateAgentErr } = await supabase
+    .from('agents')
+    .select('id')
+    .eq('user_id', candidate_user_id)
+    .eq('status', 'active')
+    .limit(1)
+    .single();
+
+  if (candidateAgentErr || !candidateAgentRow) {
+    return NextResponse.json({ error: 'candidate_agent_not_found' }, { status: 404 });
+  }
+
+  const candidateAgentId: string = candidateAgentRow.id;
+
   // ── Compute canonical pair key (smaller UUID first) ───────────────────────
   const pairKey =
-    ownAgentId < candidate_agent_id
-      ? `${ownAgentId}|${candidate_agent_id}`
-      : `${candidate_agent_id}|${ownAgentId}`;
+    ownAgentId < candidateAgentId
+      ? `${ownAgentId}|${candidateAgentId}`
+      : `${candidateAgentId}|${ownAgentId}`;
 
   // ── Send Inngest event ────────────────────────────────────────────────────
   await inngest.send({
@@ -139,7 +154,7 @@ export async function POST(req: Request): Promise<Response> {
       user_id: worldUserId,
       surface: 'dating',
       agent_a_id: ownAgentId,
-      agent_b_id: candidate_agent_id,
+      agent_b_id: candidateAgentId,
       pair_key: pairKey,
       language: languagePref,
     },
@@ -149,7 +164,8 @@ export async function POST(req: Request): Promise<Response> {
   await supabase.from('outcome_events').insert({
     user_id: worldUserId,
     event_type: 'viewed',
-    candidate_user_id: candidate_agent_id,
+    source_screen: 'stroll',
+    metadata: { candidate_user_id: candidate_user_id, agent_b_id: candidateAgentId },
   });
 
   return NextResponse.json({ conversation_id_pending: true });

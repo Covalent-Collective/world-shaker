@@ -151,40 +151,29 @@ export async function POST(req: Request) {
   // ── Persist answer ────────────────────────────────────────────────────────
   const db = getServiceClient();
 
-  await db
+  // Read current interview_answers to merge the new answer in.
+  const { data: row, error: readError } = await db
     .from('agents')
-    .update({
-      interview_answers: db.rpc('jsonb_build_object_merge', {
-        existing: 'interview_answers',
-        key: skeleton_question_id,
-        value: answer,
-      }) as unknown as Record<string, string>,
-    })
+    .select('interview_answers')
+    .eq('user_id', world_user_id)
+    .single();
+
+  if (readError) {
+    console.error('[agent/answer] read agent row error', readError);
+    return NextResponse.json({ error: 'save_failed' }, { status: 500 });
+  }
+
+  const current = (row?.interview_answers as Record<string, string>) ?? {};
+  const merged = { ...current, [skeleton_question_id]: answer };
+
+  const { error: updErr } = await db
+    .from('agents')
+    .update({ interview_answers: merged })
     .eq('user_id', world_user_id);
 
-  // The above uses a custom RPC form which may not exist. Use raw SQL via rpc instead.
-  // Re-implement with the correct pattern: use a raw UPDATE with jsonb concatenation.
-  // We call a dedicated RPC that handles the merge atomically.
-  const { error: rpcError } = await db.rpc('upsert_interview_answer', {
-    p_user_id: world_user_id,
-    p_question_id: skeleton_question_id,
-    p_answer: answer,
-  });
-
-  if (rpcError) {
-    // Fallback: use UPDATE with jsonb || operator via raw query approach.
-    // This updates interview_answers by merging with the new key-value pair.
-    const { error: fallbackError } = await db
-      .from('agents')
-      .update({
-        interview_answers: { [skeleton_question_id]: answer } as unknown as Record<string, string>,
-      })
-      .eq('user_id', world_user_id);
-
-    if (fallbackError) {
-      console.error('[agent/answer] persist error', fallbackError);
-      return NextResponse.json({ error: 'save_failed' }, { status: 500 });
-    }
+  if (updErr) {
+    console.error('[agent/answer] persist error', updErr);
+    return NextResponse.json({ error: 'save_failed' }, { status: 500 });
   }
 
   // ── Probe generation ──────────────────────────────────────────────────────
@@ -192,19 +181,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ saved: true });
   }
 
-  // Load the just-updated row to get all prior answers.
-  const { data: agentRow, error: fetchError } = await db
-    .from('agents')
-    .select('interview_answers')
-    .eq('user_id', world_user_id)
-    .single();
-
-  if (fetchError || !agentRow) {
-    console.error('[agent/answer] fetch agent row error', fetchError);
-    return NextResponse.json({ error: 'fetch_failed' }, { status: 500 });
-  }
-
-  const prior_answers = (agentRow.interview_answers as Record<string, string>) ?? {};
+  // `merged` already contains all answers including the one just saved.
+  const prior_answers = merged;
   const skeleton_question = await resolveSkeletonQuestion(skeleton_question_id);
 
   try {

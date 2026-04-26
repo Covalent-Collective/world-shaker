@@ -36,9 +36,11 @@ export async function POST(
   }
 
   let worldUserId: string;
+  let languagePref: 'ko' | 'en';
   try {
     const claims = await verifyWorldUserJwt(token);
     worldUserId = claims.world_user_id;
+    languagePref = claims.language_pref;
   } catch {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
@@ -75,11 +77,11 @@ export async function POST(
   await inngest.send({
     name: 'conversation/start',
     data: {
+      user_id: worldUserId,
+      surface: conv.surface,
       agent_a_id: conv.agent_a_id,
       agent_b_id: conv.agent_b_id,
-      surface: conv.surface,
-      pair_key: conv.pair_key,
-      previous_conversation_id: conv.id,
+      language: languagePref,
     },
   });
 

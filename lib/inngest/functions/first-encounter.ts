@@ -1,6 +1,7 @@
 import { inngest } from '../client';
 import { getServiceClient } from '@/lib/supabase/service';
 import { generateAvatar } from '@/lib/avatar/generate';
+import { getDailyQuota } from '@/lib/quota/daily';
 
 /**
  * First-encounter pipeline.
@@ -10,17 +11,16 @@ import { generateAvatar } from '@/lib/avatar/generate';
  * Triggered by `agent.activated` event with payload { user_id, agent_id }.
  *
  * Steps:
+ *   0. quota-check: enforce daily quota (US-312). If used >= max, insert
+ *      outcome_event 'wont_connect' and return early.
  *   1. pick-candidate: call match_candidates(target_user, k=10, mode='system_generated')
  *      and pick the top-scoring candidate. (Seed-pool mixing for low active-user
  *      counts is deferred to Phase 4 / Step 4.6 — for v0 we just use whatever
  *      match_candidates returns; if the candidate pool is empty the function exits
  *      cleanly and AC-21 recovery will retry on next app load.)
  *   2. avatar: ensure agent has an avatar_url; call generateAvatar() if missing.
- *   3. spawn-conversation: emit `conversation/start` event with deterministic
- *      pair_key = sorted(agent_a, agent_b) joined by '|'.
- *   4. mark-first-encounter: poll for the matches row produced by the
- *      downstream generate-report fn and flip first_encounter=true. Used by
- *      the AC-21 recovery check.
+ *   3. spawn-conversation: emit `conversation/start` via step.sendEvent with
+ *      is_first_encounter: true so generate-report stamps the match row correctly.
  */
 export const firstEncounter = inngest.createFunction(
   {
@@ -33,6 +33,32 @@ export const firstEncounter = inngest.createFunction(
 
     if (!user_id || !agent_id) {
       throw new Error('agent.activated event missing user_id or agent_id');
+    }
+
+    // ── Step 0: daily quota check (US-312) ─────────────────────────────
+    const quotaResult = await step.run('quota-check', async () => {
+      const quota = await getDailyQuota(user_id);
+      return { used: quota.used, max: quota.max };
+    });
+
+    if (quotaResult.used >= quotaResult.max) {
+      await step.run('emit-wont-connect', async () => {
+        const supabase = getServiceClient();
+        await supabase.from('outcome_events').insert({
+          user_id,
+          event_type: 'wont_connect',
+          source_screen: 'first-encounter',
+          metadata: {
+            reason: 'daily_quota_exceeded',
+            used: quotaResult.used,
+            max: quotaResult.max,
+          },
+        });
+      });
+      logger.info(
+        `[first-encounter] daily quota exceeded for user=${user_id} (${quotaResult.used}/${quotaResult.max}) — exiting`,
+      );
+      return { spawned: false, reason: 'daily_quota_exceeded' };
     }
 
     // ── Step 1: pick best candidate ─────────────────────────────────────
@@ -96,60 +122,28 @@ export const firstEncounter = inngest.createFunction(
     });
 
     // ── Step 3: spawn conversation ──────────────────────────────────────
+    // Use step.sendEvent (durable) instead of inngest.send (fire-and-forget).
+    // pair_key is intentionally omitted — live-conversation computes it
+    // canonically from agent_a_id and agent_b_id.
+    // is_first_encounter: true is forwarded through conversation.completed
+    // so generate-report stamps the match row correctly (AC-21 recovery semantic).
     const { pair_key, agent_a_id, agent_b_id } = await step.run('spawn-conversation', async () => {
       const a = agent_id;
       const b = candidate.candidate_agent_id;
       const pairKey = a < b ? `${a}|${b}` : `${b}|${a}`;
-
-      await inngest.send({
-        name: 'conversation/start',
-        data: {
-          user_id,
-          surface: 'dating' as const,
-          agent_a_id: a,
-          agent_b_id: b,
-          pair_key: pairKey,
-          language: 'ko' as const,
-          origin: 'system_generated' as const,
-          first_encounter: true,
-        },
-      });
-
       return { pair_key: pairKey, agent_a_id: a, agent_b_id: b };
     });
 
-    // ── Step 4: mark matches.first_encounter=true once the row exists ───
-    // The downstream live-conversation + generate-report Inngest fns insert
-    // a matches row when the conversation completes. We poll briefly for it
-    // and stamp first_encounter=true. If the row never appears (e.g. the
-    // conversation failed), we exit cleanly — AC-21 recovery handles retry.
-    const marked = await step.run('mark-first-encounter', async () => {
-      const supabase = getServiceClient();
-      const startedAt = Date.now();
-      const deadlineMs = startedAt + 10 * 60 * 1000; // 10 minutes
-
-      while (Date.now() < deadlineMs) {
-        const { data, error } = await supabase
-          .from('matches')
-          .select('id')
-          .eq('user_id', user_id)
-          .eq('candidate_user_id', candidate.candidate_user_id)
-          .eq('origin', 'system_generated')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (error) throw new Error(`matches lookup error: ${error.message}`);
-        if (data) {
-          const { error: updateError } = await supabase
-            .from('matches')
-            .update({ first_encounter: true })
-            .eq('id', data.id);
-          if (updateError) throw new Error(`matches update error: ${updateError.message}`);
-          return { match_id: data.id as string, marked: true };
-        }
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
-      }
-      return { match_id: null, marked: false };
+    await step.sendEvent('send-conversation-start', {
+      name: 'conversation/start',
+      data: {
+        user_id,
+        surface: 'dating' as const,
+        agent_a_id,
+        agent_b_id,
+        language: 'ko' as const,
+        is_first_encounter: true,
+      },
     });
 
     return {
@@ -158,8 +152,6 @@ export const firstEncounter = inngest.createFunction(
       agent_a_id,
       agent_b_id,
       candidate_user_id: candidate.candidate_user_id,
-      first_encounter_marked: marked.marked,
-      match_id: marked.match_id,
     };
   },
 );

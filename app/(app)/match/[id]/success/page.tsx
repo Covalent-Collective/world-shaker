@@ -1,7 +1,10 @@
-import { notFound } from 'next/navigation';
-import { getServerClient } from '@/lib/supabase/server';
+import { cookies } from 'next/headers';
+import { notFound, redirect } from 'next/navigation';
+
 import AgentFarewell from '@/components/match/AgentFarewell';
 import StarterCard from '@/components/match/StarterCard';
+import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
+import { getServiceClient } from '@/lib/supabase/service';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -9,21 +12,29 @@ interface PageProps {
 
 export default async function MatchSuccessPage({ params }: PageProps): Promise<React.ReactElement> {
   const { id } = await params;
-  const supabase = await getServerClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!token) redirect('/onboarding/verify');
 
-  const { data: match } = await supabase
+  let worldUserId: string;
+  try {
+    const claims = await verifyWorldUserJwt(token);
+    worldUserId = claims.world_user_id;
+  } catch {
+    redirect('/onboarding/verify');
+  }
+
+  const db = getServiceClient();
+  const { data: match } = await db
     .from('matches')
     .select('id, status, user_id, starters, world_chat_link')
     .eq('id', id)
-    .single();
+    .eq('user_id', worldUserId)
+    .eq('status', 'mutual')
+    .maybeSingle();
 
-  if (!match || match.status !== 'mutual' || match.user_id !== user?.id) {
-    notFound();
-  }
+  if (!match) notFound();
 
   const starters: Array<{ text: string }> = Array.isArray(match.starters) ? match.starters : [];
   const worldChatLink: string = match.world_chat_link ?? '#';

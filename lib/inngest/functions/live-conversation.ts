@@ -54,6 +54,9 @@ export type ConversationStartPayload = {
   pair_key?: string;
   language: Lang;
   max_turns?: number;
+  /** Set to true when this conversation was spawned by the first-encounter pipeline.
+   *  Forwarded to conversation.completed so generate-report can stamp the match row. */
+  is_first_encounter?: boolean;
 };
 
 interface AgentRow {
@@ -102,7 +105,7 @@ export const liveConversation = inngest.createFunction(
   },
   async ({ event, step, logger }) => {
     const payload = event.data as ConversationStartPayload;
-    const { user_id, surface, agent_a_id, agent_b_id, language } = payload;
+    const { user_id, surface, agent_a_id, agent_b_id, language, is_first_encounter } = payload;
     const maxTurns = Math.min(payload.max_turns ?? DEFAULT_MAX_TURNS, DEFAULT_MAX_TURNS);
 
     // Canonical pair_key: computed internally so callers cannot inject an
@@ -332,7 +335,7 @@ export const liveConversation = inngest.createFunction(
 
     await step.sendEvent('emit-conversation-completed', {
       name: CONVERSATION_COMPLETED_EVENT,
-      data: { conversation_id },
+      data: { conversation_id, is_first_encounter: is_first_encounter ?? false },
     });
 
     return { conversation_id, status: 'completed', turns: maxTurns };

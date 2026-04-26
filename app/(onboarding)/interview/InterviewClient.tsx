@@ -108,11 +108,14 @@ export default function InterviewClient({
     // the Inngest client client-side — the Inngest signing key must never
     // touch the browser. The route just does `inngest.send({ name:
     // 'agent.activated', data: { user_id, agent_id } })` from server context.
-    await fetch('/api/agent/activate', {
+    const res = await fetch('/api/agent/activate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
+    if (!res.ok) {
+      throw new Error(`activate_failed_${res.status}`);
+    }
   }
 
   function advanceAfterProbe(): void {

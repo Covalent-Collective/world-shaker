@@ -216,11 +216,11 @@ describe('POST /api/conversation/[id]/restart', () => {
     expect(mockInngestSend).toHaveBeenCalledWith({
       name: 'conversation/start',
       data: {
+        user_id: 'u1',
+        surface: 'dating',
         agent_a_id: 'a1',
         agent_b_id: 'a2',
-        surface: 'dating',
-        pair_key: 'a1:a2',
-        previous_conversation_id: 'c1',
+        language: 'ko',
       },
     });
   });

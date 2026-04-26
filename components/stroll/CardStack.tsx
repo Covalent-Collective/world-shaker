@@ -9,7 +9,7 @@ export interface StrollCandidate {
 
 interface CardStackProps {
   candidates: StrollCandidate[];
-  onTap: (candidateAgentId: string) => void;
+  onTap: (candidateUserId: string) => void;
 }
 
 /**
