@@ -35,7 +35,8 @@ export default function VerifyPage(): React.ReactElement {
           reason: 'minikit_error',
           code: finalPayload.error_code,
         });
-        toast.error(t('verify.error_toast'));
+        // DEBUG: surface MiniKit error code on screen.
+        toast.error(`MiniKit: ${finalPayload.error_code ?? 'unknown'}`);
         return;
       }
 
@@ -51,7 +52,15 @@ export default function VerifyPage(): React.ReactElement {
         router.push('/intro');
       } else {
         posthog.capture('verify_error', { reason: 'non_200', status: res.status });
-        toast.error(t('verify.error_toast'));
+        // DEBUG: surface server error detail on screen.
+        let detail = `${res.status}`;
+        try {
+          const json = (await res.json()) as { error?: string; detail?: string };
+          detail = `${json.error ?? res.status}: ${json.detail ?? ''}`.slice(0, 240);
+        } catch {
+          // ignore JSON parse failure; status code already in detail
+        }
+        toast.error(`Server: ${detail}`);
       }
     } catch {
       posthog.capture('verify_error', { reason: 'network' });
