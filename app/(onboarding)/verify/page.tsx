@@ -21,7 +21,8 @@ export default function VerifyPage(): React.ReactElement {
     try {
       if (!MiniKit.isInstalled()) {
         posthog.capture('verify_error', { reason: 'not_in_world_app' });
-        toast.error(t('verify.error_toast'));
+        // TEMP DIAG: surface real error in toast — revert once root cause identified.
+        toast.error('NotInWorld');
         return;
       }
 
@@ -31,11 +32,9 @@ export default function VerifyPage(): React.ReactElement {
       });
 
       if (finalPayload.status === 'error') {
-        posthog.capture('verify_error', {
-          reason: 'minikit_error',
-          code: (finalPayload as { error_code?: string }).error_code,
-        });
-        toast.error(t('verify.error_toast'));
+        const code = (finalPayload as { error_code?: string }).error_code ?? 'unknown';
+        posthog.capture('verify_error', { reason: 'minikit_error', code });
+        toast.error(`MK:${code}`);
         return;
       }
 
@@ -46,19 +45,24 @@ export default function VerifyPage(): React.ReactElement {
       });
 
       if (!res.ok) {
-        posthog.capture('verify_error', { reason: 'non_200', status: res.status });
-        toast.error(t('verify.error_toast'));
+        let detail = `${res.status}`;
+        try {
+          const json = (await res.json()) as { error?: string; detail?: string };
+          detail = `${json.error ?? res.status}:${json.detail ?? ''}`.slice(0, 200);
+        } catch {
+          /* ignore */
+        }
+        posthog.capture('verify_error', { reason: 'non_200', status: res.status, detail });
+        toast.error(`API:${detail}`);
         return;
       }
 
       posthog.capture('verify_success');
       router.push('/intro');
     } catch (err) {
-      posthog.capture('verify_error', {
-        reason: 'thrown',
-        message: err instanceof Error ? err.message : String(err),
-      });
-      toast.error(t('verify.error_toast'));
+      const msg = err instanceof Error ? err.message : String(err);
+      posthog.capture('verify_error', { reason: 'thrown', message: msg });
+      toast.error(`THROW:${msg.slice(0, 100)}`);
     } finally {
       setBusy(false);
     }
