@@ -5,8 +5,7 @@ import { z } from 'zod';
 import { verifyWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
 import { inngest } from '@/lib/inngest/client';
-import { captureServer } from '@/lib/posthog/server';
-import { hashCohort } from '@/lib/posthog/cohort';
+import { captureServerSafe } from '@/lib/posthog/server';
 
 export const runtime = 'nodejs';
 
@@ -88,11 +87,11 @@ export async function POST(
     return NextResponse.json({ status: 'skipped', mutual: false, match_id: matchId });
   }
 
-  // Emit like_sent on accept decision. Hash candidate_user_id to avoid leaking raw UUIDs.
-  const candidateCohortLike = await hashCohort(updatedMatch.candidate_user_id);
-  void captureServer('like_sent', {
+  // Emit like_sent on accept decision. captureServerSafe hashes candidate_cohort before send.
+  void captureServerSafe('like_sent', {
     worldUserId: world_user_id,
-    properties: { match_id: matchId, candidate_cohort: candidateCohortLike },
+    properties: { match_id: matchId, candidate_cohort: updatedMatch.candidate_user_id },
+    hashProperties: ['candidate_cohort'],
   });
 
   // ── Accept: check for reciprocal accepted match ───────────────────────────
@@ -136,14 +135,11 @@ export async function POST(
     }
   }
 
-  // Emit mutual_match PostHog event for both sides. Hash candidate_user_id to avoid leaking raw UUIDs.
-  const candidateCohortMutual = await hashCohort(updatedMatch.candidate_user_id);
-  void captureServer('mutual_match', {
+  // Emit mutual_match PostHog event for both sides. captureServerSafe hashes candidate_cohort before send.
+  void captureServerSafe('mutual_match', {
     worldUserId: world_user_id,
-    properties: {
-      match_id: matchId,
-      candidate_cohort: candidateCohortMutual,
-    },
+    properties: { match_id: matchId, candidate_cohort: updatedMatch.candidate_user_id },
+    hashProperties: ['candidate_cohort'],
   });
 
   // Emit event for downstream jobs (chat creation, push notification, etc.)

@@ -238,3 +238,105 @@ describe('captureServer', () => {
     expect(arg.distinctId).toBe(expectedHash(rawHex, 'shape-salt'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// captureServerSafe — fire-and-forget; never throws; hashes listed properties
+// ---------------------------------------------------------------------------
+
+describe('captureServerSafe', () => {
+  const mockCaptureSafe = vi.fn();
+  const mockFlushSafe = vi.fn().mockResolvedValue(undefined);
+
+  beforeEach(() => {
+    vi.resetModules();
+    mockFrom.mockReset();
+    mockSelect.mockReset();
+    mockEq.mockReset();
+    mockSingle.mockReset();
+    mockCaptureSafe.mockReset();
+    mockFlushSafe.mockReset().mockResolvedValue(undefined);
+
+    vi.doMock('posthog-node', () => ({
+      PostHog: vi.fn(function (this: {
+        capture: typeof mockCaptureSafe;
+        flush: typeof mockFlushSafe;
+      }) {
+        this.capture = mockCaptureSafe;
+        this.flush = mockFlushSafe;
+      }),
+    }));
+
+    process.env.POSTHOG_PROJECT_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    delete process.env.POSTHOG_PROJECT_API_KEY;
+    vi.clearAllMocks();
+  });
+
+  it('(a) does not throw and logs a warning when hashCohort throws (salt read fail)', async () => {
+    // Make the DB call fail so hashCohort throws.
+    mockSingle.mockResolvedValue({ data: null, error: { message: 'salt read fail' } });
+    mockEq.mockReturnValue({ single: mockSingle });
+    mockSelect.mockReturnValue({ eq: mockEq });
+    mockFrom.mockReturnValue({ select: mockSelect });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { captureServerSafe } = await import('../server');
+
+    // Must not throw even though hashing the worldUserId (inside captureServer) will fail.
+    await expect(
+      captureServerSafe('like_sent', {
+        worldUserId: 'user-fail',
+        properties: { candidate_cohort: 'user-bob' },
+        hashProperties: ['candidate_cohort'],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[posthog] captureServerSafe error',
+      expect.objectContaining({ event: 'like_sent' }),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('(b) is a no-op when PostHog is disabled (no API key)', async () => {
+    delete process.env.POSTHOG_PROJECT_API_KEY;
+    // No salt mock needed — PostHog client is null, so we return before any hashing.
+
+    const { captureServerSafe } = await import('../server');
+
+    await expect(
+      captureServerSafe('like_sent', { worldUserId: 'user-x' }),
+    ).resolves.toBeUndefined();
+
+    expect(mockCaptureSafe).not.toHaveBeenCalled();
+  });
+
+  it('(c) hashes listed hashProperties values before forwarding to captureServer', async () => {
+    const salt = 'safe-salt';
+    mockSalt(salt);
+
+    const { captureServerSafe } = await import('../server');
+
+    const rawCandidateId = 'user-bob-raw-uuid';
+    await captureServerSafe('like_sent', {
+      worldUserId: 'user-alice',
+      properties: { match_id: 'match-123', candidate_cohort: rawCandidateId },
+      hashProperties: ['candidate_cohort'],
+    });
+
+    expect(mockCaptureSafe).toHaveBeenCalledTimes(1);
+    const captureArg = mockCaptureSafe.mock.calls[0][0] as {
+      properties?: Record<string, unknown>;
+    };
+
+    // candidate_cohort must be the hash of the raw id, not the raw id itself.
+    expect(captureArg.properties?.candidate_cohort).toBe(expectedHash(rawCandidateId, salt));
+    expect(captureArg.properties?.candidate_cohort).not.toBe(rawCandidateId);
+    // Other properties must be forwarded unchanged.
+    expect(captureArg.properties?.match_id).toBe('match-123');
+  });
+});

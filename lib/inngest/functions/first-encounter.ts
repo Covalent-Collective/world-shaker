@@ -2,8 +2,7 @@ import { inngest } from '../client';
 import { getServiceClient } from '@/lib/supabase/service';
 import { generateAvatar } from '@/lib/avatar/generate';
 import { getDailyQuota } from '@/lib/quota/daily';
-import { captureServer } from '@/lib/posthog/server';
-import { hashCohort } from '@/lib/posthog/cohort';
+import { captureServerSafe } from '@/lib/posthog/server';
 
 /**
  * First-encounter pipeline.
@@ -163,18 +162,17 @@ export const firstEncounter = inngest.createFunction(
       },
     });
 
-    await step.run('posthog-first-encounter-spawned', async () => {
-      // Hash candidate_user_id to avoid leaking raw UUIDs in PostHog properties.
-      const candidateCohort = await hashCohort(candidate.candidate_user_id);
-      await captureServer('first_encounter_spawned', {
-        worldUserId: user_id,
-        properties: {
-          agent_a_id,
-          agent_b_id,
-          pair_key,
-          candidate_cohort: candidateCohort,
-        },
-      });
+    // Fire-and-forget analytics — must not block or fail the Inngest function.
+    // captureServerSafe hashes candidate_cohort before send and swallows errors.
+    void captureServerSafe('first_encounter_spawned', {
+      worldUserId: user_id,
+      properties: {
+        agent_a_id,
+        agent_b_id,
+        pair_key,
+        candidate_cohort: candidate.candidate_user_id,
+      },
+      hashProperties: ['candidate_cohort'],
     });
 
     return {

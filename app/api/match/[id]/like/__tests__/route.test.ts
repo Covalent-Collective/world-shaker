@@ -31,9 +31,10 @@ vi.mock('@/lib/inngest/client', () => ({
   inngest: { send: (...args: unknown[]) => mockInngestSend(...args) },
 }));
 
-// PostHog cohort mock — hashCohort needs no real DB in unit tests
-vi.mock('@/lib/posthog/cohort', () => ({
-  hashCohort: (id: string) => Promise.resolve(`hashed:${id}`),
+// PostHog server mock — captureServerSafe is fire-and-forget; capture calls recorded for assertion
+const mockCaptureServerSafe = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/lib/posthog/server', () => ({
+  captureServerSafe: (...args: unknown[]) => mockCaptureServerSafe(...args),
 }));
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,7 @@ describe('POST /api/match/[id]/like', () => {
     vi.clearAllMocks();
     mockGetServiceClient.mockReturnValue({ from: mockFrom });
     mockInngestSend.mockResolvedValue(undefined);
+    mockCaptureServerSafe.mockResolvedValue(undefined);
   });
 
   // ── 401 missing auth ────────────────────────────────────────────────────
@@ -197,6 +199,13 @@ describe('POST /api/match/[id]/like', () => {
     );
 
     expect(mockInngestSend).not.toHaveBeenCalled();
+
+    // like_sent fired with raw candidate_user_id as candidate_cohort (hashing delegated to captureServerSafe)
+    expect(mockCaptureServerSafe).toHaveBeenCalledWith('like_sent', {
+      worldUserId: 'user-alice',
+      properties: expect.objectContaining({ candidate_cohort: 'user-bob' }),
+      hashProperties: ['candidate_cohort'],
+    });
   });
 
   // ── accept with reciprocal → mutual ─────────────────────────────────────
@@ -278,6 +287,19 @@ describe('POST /api/match/[id]/like', () => {
         user_a: 'user-alice',
         user_b: 'user-bob',
       },
+    });
+
+    // like_sent and mutual_match fired with raw candidate_user_id as candidate_cohort
+    // (hashing is delegated to captureServerSafe, not done inline here)
+    expect(mockCaptureServerSafe).toHaveBeenCalledWith('like_sent', {
+      worldUserId: 'user-alice',
+      properties: expect.objectContaining({ candidate_cohort: 'user-bob' }),
+      hashProperties: ['candidate_cohort'],
+    });
+    expect(mockCaptureServerSafe).toHaveBeenCalledWith('mutual_match', {
+      worldUserId: 'user-alice',
+      properties: expect.objectContaining({ candidate_cohort: 'user-bob' }),
+      hashProperties: ['candidate_cohort'],
     });
   });
 });
