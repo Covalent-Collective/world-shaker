@@ -35,6 +35,7 @@ const ko = {
   'interview.skeleton.q6': '앞으로 한 달 안에 꼭 해보고 싶은 작은 일이 있다면요?',
   // TODO(copy-review): proposed: '서로가 닿았어요' — reason: '연결됐어요' (connected) is a technical-sounding metaphor; '닿았어요' (reached/touched) is softer and more emotionally resonant without gamification
   'success.title': '서로가 연결됐어요',
+  'success.subtitle': '에이전트가 두 분을 이어줬어요. 이제 직접 만나보세요.',
   // TODO(copy-review): proposed: '대화 열기' — reason: '대화 시작하기' is accurate but feels like a CTA button label; '대화 열기' is shorter, action-first, and avoids the start/begin framing that implies a task
   'success.starter_label': '대화 시작하기',
   'success.world_chat_cta': 'World Chat에서 만나기',
@@ -122,6 +123,7 @@ const en = {
     "What's one small thing you want to try in the next month — and why does it matter to you?",
   // TODO(copy-review): proposed: 'You found each other' — reason: 'You matched each other' borrows dating-app gamification framing ('match' implies a game result); 'You found each other' is more human, less transactional
   'success.title': 'You matched each other',
+  'success.subtitle': 'Your agents introduced you. Take it from here.',
   // TODO(copy-review): proposed: 'Open conversation' — reason: 'Start the conversation' is directional and imperative; 'Open conversation' is shorter, action-oriented, and avoids the instructional register
   'success.starter_label': 'Start the conversation',
   'success.world_chat_cta': 'Meet on World Chat',

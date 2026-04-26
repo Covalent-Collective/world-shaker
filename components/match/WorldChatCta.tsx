@@ -21,21 +21,9 @@ interface WorldChatCtaProps {
  * WorldChatCta — handoff button that drops the user into the World Chat
  * mini app with a draft message ready to send.
  *
- * The earlier implementation used a plain `<a href>` to a worldcoin.org
- * universal link with `target="_blank"`. Inside the World App's MiniApp
- * WebView, target=_blank links don't escape the WebView (no popup
- * support), so the click was silently no-op'd from the user's POV.
- *
- * Inside the World App we instead drive the official MiniKit
- * `commandsAsync.chat` command (added in MiniKit 1.x), which opens the
- * World Chat mini app on top of ours with the draft pre-filled. `to`
- * is omitted because we don't yet have the partner's World App
- * username (would require a wallet-auth round-trip + getUserByAddress
- * resolve); the user picks the recipient inside the chat composer.
- *
- * Outside the World App we fall back to the universal link, which
- * Worldcoin's CDN will route to the App Store / web profile depending
- * on the user's environment.
+ * Uses MiniKit `commandsAsync.chat` inside the World App (target=_blank
+ * universal links don't escape the MiniApp WebView). Falls back to the
+ * universal link for browser-based viewers.
  */
 export default function WorldChatCta({
   partnerName,
@@ -94,9 +82,31 @@ export default function WorldChatCta({
       type="button"
       onClick={handleClick}
       disabled={busy}
-      className="w-full max-w-sm rounded-xl bg-foreground text-background py-3 px-6 text-sm font-semibold text-center transition-opacity hover:opacity-80 active:opacity-60 disabled:opacity-50"
+      aria-busy={busy}
+      className="group relative w-full max-w-sm overflow-hidden rounded-full px-7 py-4 bg-gradient-to-r from-accent-gold via-amber-400 to-accent-ember text-zinc-900 text-base font-semibold tracking-wide shadow-[0_10px_30px_-8px_rgba(255,138,76,0.55)] ring-1 ring-white/20 transition-transform duration-200 ease-out hover:-translate-y-0.5 hover:shadow-[0_14px_40px_-8px_rgba(255,138,76,0.75)] active:translate-y-0 active:scale-[0.98] disabled:opacity-70 disabled:hover:translate-y-0 disabled:cursor-not-allowed"
     >
-      {t('success.world_chat_cta')}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
+      />
+      <span className="relative flex items-center justify-center gap-2.5">
+        <span>{t('success.world_chat_cta')}</span>
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          width="18"
+          height="18"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.25"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="transition-transform duration-200 ease-out group-hover:translate-x-0.5"
+        >
+          <path d="M22 2 11 13" />
+          <path d="m22 2-7 20-4-9-9-4z" />
+        </svg>
+      </span>
     </button>
   );
 }

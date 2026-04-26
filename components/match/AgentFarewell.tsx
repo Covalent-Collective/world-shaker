@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useT } from '@/lib/i18n/useT';
 
 interface AgentFarewellProps {
   className?: string;
 }
 
 export default function AgentFarewell({ className }: AgentFarewellProps): React.ReactElement {
+  const t = useT();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -20,13 +22,17 @@ export default function AgentFarewell({ className }: AgentFarewellProps): React.
     <div
       data-testid="agent-farewell"
       className={cn(
-        'text-center space-y-2 transition-all duration-400 ease-out',
-        mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
+        'text-center space-y-3 transition-all duration-500 ease-out',
+        mounted ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-1',
         className,
       )}
     >
-      <p className="font-serif text-2xl leading-snug text-text">서로가 연결됐어요</p>
-      <p className="text-sm text-text-2">에이전트가 두 분을 이어줬어요. 이제 직접 만나보세요.</p>
+      <p className="font-serif text-3xl leading-tight text-text tracking-tight">
+        {t('success.title')}
+      </p>
+      <p className="text-sm text-text-2 max-w-xs mx-auto leading-relaxed">
+        {t('success.subtitle')}
+      </p>
     </div>
   );
 }
