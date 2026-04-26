@@ -31,12 +31,31 @@ const config: Config = {
           spot: '#FFD9A8',
           floor: '#1A1B26',
         },
+        // Pokémon-style café palette + dialogue panel
+        cafe: {
+          wallTop: '#3a2418',
+          wallBot: '#2a1a10',
+          floorA: '#a07254',
+          floorB: '#8a5d3f',
+          tableTop: '#5a3520',
+          tableShadow: '#3a2010',
+          lampGlow: '#FFE9B0',
+        },
+        dialog: {
+          fill: '#fffaf0',
+          fillDeep: '#f0e6d2',
+          border: '#3a2418',
+          borderInner: '#9c7a4a',
+          ink: '#1a1410',
+          inkSoft: '#5a4830',
+        },
         warn: '#FF8A6B',
         safe: '#84E58A',
       },
       fontFamily: {
         sans: ['var(--font-inter)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         serif: ['var(--font-crimson)', 'var(--font-noto-serif-kr)', 'Georgia', 'serif'],
+        pixel: ['var(--font-press-start)', 'ui-monospace', 'Menlo', 'monospace'],
       },
       keyframes: {
         drift: {
@@ -81,6 +100,39 @@ const config: Config = {
           '15%': { opacity: '0.45' },
           '100%': { transform: 'translateY(-60vh) scale(0.6)', opacity: '0' },
         },
+        // Pokémon-style motion
+        walkInLeft: {
+          '0%': { transform: 'translateX(-140%)', opacity: '0' },
+          '15%': { opacity: '1' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        walkInRight: {
+          '0%': { transform: 'translateX(140%)', opacity: '0' },
+          '15%': { opacity: '1' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        idleBob: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-2px)' },
+        },
+        walkBob: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '25%': { transform: 'translateY(-3px)' },
+          '50%': { transform: 'translateY(0)' },
+          '75%': { transform: 'translateY(-3px)' },
+        },
+        dialogSlideUp: {
+          '0%': { transform: 'translateY(120%)' },
+          '100%': { transform: 'translateY(0)' },
+        },
+        blink: {
+          '0%, 100%': { opacity: '0' },
+          '50%': { opacity: '1' },
+        },
+        speakerHalo: {
+          '0%, 100%': { opacity: '0.35' },
+          '50%': { opacity: '0.65' },
+        },
       },
       animation: {
         drift: 'drift 9s ease-in-out infinite',
@@ -96,6 +148,13 @@ const config: Config = {
         'ember-rise': 'emberRise 14s linear infinite',
         'ember-rise-2': 'emberRise 18s linear infinite',
         'ember-rise-3': 'emberRise 11s linear infinite',
+        'walk-in-left': 'walkInLeft 2.2s cubic-bezier(0.4, 0, 0.2, 1) both',
+        'walk-in-right': 'walkInRight 2.2s cubic-bezier(0.4, 0, 0.2, 1) both',
+        'idle-bob': 'idleBob 2.8s ease-in-out infinite',
+        'walk-bob': 'walkBob 0.4s steps(2) infinite',
+        'dialog-slide-up': 'dialogSlideUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both',
+        blink: 'blink 0.9s ease-in-out infinite',
+        'speaker-halo': 'speakerHalo 1.2s ease-in-out infinite',
       },
     },
   },

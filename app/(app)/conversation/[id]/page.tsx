@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 
 import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
-import EncounterStage from '@/components/encounter/EncounterStage';
+import PokemonStage from '@/components/encounter/PokemonStage';
 import type { ConversationStatus } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
@@ -76,7 +76,7 @@ export default async function ConversationPage({
   const lastEventId = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
 
   return (
-    <EncounterStage
+    <PokemonStage
       conversationId={conv.id}
       initialStatus={conv.status as ConversationStatus}
       initialLastEventId={lastEventId}
