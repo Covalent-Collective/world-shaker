@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Crimson_Pro, Noto_Serif_KR } from 'next/font/google';
+import { Inter, Crimson_Pro, Noto_Serif_KR, Press_Start_2P } from 'next/font/google';
 import { cookies } from 'next/headers';
 import './globals.css';
 import { Providers } from './providers';
@@ -24,6 +24,12 @@ const notoSerifKR = Noto_Serif_KR({
   subsets: ['latin'],
   weight: ['400', '500', '700'],
   variable: '--font-noto-serif-kr',
+});
+
+const pressStart = Press_Start_2P({
+  subsets: ['latin'],
+  weight: ['400'],
+  variable: '--font-press-start',
 });
 
 export const metadata: Metadata = {
@@ -52,7 +58,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html
       lang={lang}
-      className={`dark ${inter.variable} ${crimsonPro.variable} ${notoSerifKR.variable}`}
+      className={`dark ${inter.variable} ${crimsonPro.variable} ${notoSerifKR.variable} ${pressStart.variable}`}
     >
       <body className="bg-bg text-text font-sans antialiased">
         <LangProvider lang={lang}>
