@@ -141,7 +141,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   }
 
   // ---- 3. Initial replay range -----------------------------------------
-  const lastEventIdFloor = parseLastEventId(req.headers.get('Last-Event-ID'));
+  // Some webview environments strip the Last-Event-ID header on reconnect.
+  // Accept the same value as a ?lastEventId= query param fallback so resume
+  // works in those environments too (LiveTranscript sends both).
+  const headerLastEventId = req.headers.get('Last-Event-ID');
+  const url = new URL(req.url);
+  const queryLastEventId = url.searchParams.get('lastEventId');
+  const lastEventIdFloor = parseLastEventId(headerLastEventId ?? queryLastEventId);
 
   const encoder = new TextEncoder();
 

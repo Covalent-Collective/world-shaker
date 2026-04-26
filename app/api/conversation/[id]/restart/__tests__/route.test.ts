@@ -1,11 +1,20 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockInngestSend, mockGetServiceClient, mockCookies, mockVerifyJwt } = vi.hoisted(() => ({
+const {
+  mockInngestSend,
+  mockGetServiceClient,
+  mockCookies,
+  mockVerifyJwt,
+  mockAssertQuota,
+  mockGetDailyQuota,
+} = vi.hoisted(() => ({
   mockInngestSend: vi.fn(),
   mockGetServiceClient: vi.fn(),
   mockCookies: vi.fn(),
   mockVerifyJwt: vi.fn(),
+  mockAssertQuota: vi.fn(),
+  mockGetDailyQuota: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({
@@ -23,6 +32,11 @@ vi.mock('@/lib/supabase/service', () => ({
 vi.mock('@/lib/auth/jwt', () => ({
   SESSION_COOKIE: 'ws_session',
   verifyWorldUserJwt: mockVerifyJwt,
+}));
+
+vi.mock('@/lib/quota/daily', () => ({
+  assertQuotaAvailable: mockAssertQuota,
+  getDailyQuota: mockGetDailyQuota,
 }));
 
 import { POST } from '../route';
@@ -47,11 +61,14 @@ function buildSupabaseStub(convResult: MaybeSingleResult, agentsResult?: AgentsR
     );
   const convSelect = vi.fn(() => ({ eq: convEq }));
   const agentsSelect = vi.fn(() => ({ in: inFn }));
+  // outcome_events insert stub (used when quota is exceeded)
+  const insertFn = vi.fn().mockResolvedValue({ error: null });
   const from = vi.fn((table: string) => {
     if (table === 'agents') return { select: agentsSelect };
+    if (table === 'outcome_events') return { insert: insertFn };
     return { select: convSelect };
   });
-  return { from };
+  return { from, insertFn };
 }
 
 function buildCookieStore(token: string | undefined) {
@@ -206,6 +223,7 @@ describe('POST /api/conversation/[id]/restart', () => {
         },
       ),
     );
+    mockAssertQuota.mockResolvedValue({ ok: true, used: 0, max: 4 });
     mockInngestSend.mockResolvedValue(undefined);
 
     const res = await POST(new Request('http://t/'), { params: makeParams('c1') });
@@ -222,6 +240,53 @@ describe('POST /api/conversation/[id]/restart', () => {
         agent_b_id: 'a2',
         language: 'ko',
       },
+    });
+  });
+
+  it('returns 429 when daily quota is exhausted, writes wont_connect outcome, does not send Inngest event', async () => {
+    mockCookies.mockResolvedValue(buildCookieStore('good'));
+    mockVerifyJwt.mockResolvedValue({
+      world_user_id: 'u1',
+      nullifier: 'n',
+      language_pref: 'ko',
+    });
+    const nextResetAt = new Date('2026-04-27T15:00:00.000Z');
+    const stub = buildSupabaseStub(
+      {
+        data: {
+          id: 'c1',
+          status: 'failed',
+          surface: 'dating',
+          pair_key: 'a1:a2',
+          agent_a_id: 'a1',
+          agent_b_id: 'a2',
+        },
+        error: null,
+      },
+      {
+        data: [
+          { id: 'a1', user_id: 'u1' },
+          { id: 'a2', user_id: 'u2' },
+        ],
+        error: null,
+      },
+    );
+    mockGetServiceClient.mockReturnValue(stub);
+    mockAssertQuota.mockResolvedValue({ ok: false, reason: 'quota_exceeded', used: 4, max: 4 });
+    mockGetDailyQuota.mockResolvedValue({ used: 4, max: 4, nextResetAt });
+
+    const res = await POST(new Request('http://t/'), { params: makeParams('c1') });
+    const body = (await res.json()) as { error?: string; retry_at?: string };
+
+    expect(res.status).toBe(429);
+    expect(body.error).toBe('quota_exceeded');
+    expect(body.retry_at).toBe(nextResetAt.toISOString());
+    expect(mockInngestSend).not.toHaveBeenCalled();
+    expect(stub.insertFn).toHaveBeenCalledWith({
+      user_id: 'u1',
+      conversation_id: 'c1',
+      event_type: 'wont_connect',
+      metadata: { reason: 'quota_exceeded' },
     });
   });
 });

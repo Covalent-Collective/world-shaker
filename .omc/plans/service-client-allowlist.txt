@@ -24,6 +24,7 @@ lib/llm/budget.ts
 app/api/conversation/[id]/abandon/route.ts
 lib/avatar/generate.ts
 app/api/match/[id]/like/route.ts
+app/api/match/[id]/world-chat-replied/route.ts
 app/api/stroll/spawn/route.ts
 app/(app)/stroll/page.tsx
 app/(app)/conversation/[id]/page.tsx

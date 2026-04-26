@@ -142,3 +142,10 @@ alter table public.agents
   drop column if exists language_pref,
   drop column if exists avatar_generated_at,
   drop column if exists avatar_url;
+
+-- ---------- 0007: drop seed pool flag + seed data ---------------------
+-- Cascades to agents rows via users.id FK (on delete cascade).
+delete from public.users where nullifier like 'seed_user_%';
+
+alter table public.app_settings
+  drop column if exists seed_pool_active;

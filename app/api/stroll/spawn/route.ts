@@ -7,6 +7,7 @@ import { getServiceClient } from '@/lib/supabase/service';
 import { getDailyQuota } from '@/lib/quota/daily';
 import { rateLimit } from '@/lib/auth/rate-limit';
 import { inngest } from '@/lib/inngest/client';
+import { captureServer } from '@/lib/posthog/server';
 
 export const runtime = 'nodejs';
 
@@ -169,26 +170,56 @@ export async function POST(req: Request): Promise<Response> {
   const conversation_id = conversationId as string;
 
   // ── Send Inngest event (skip allocate step — id pre-allocated above) ──────
-  await inngest.send({
-    name: 'conversation/start',
-    data: {
-      user_id: worldUserId,
-      surface: 'dating',
-      agent_a_id: ownAgentId,
-      agent_b_id: candidateAgentId,
-      pair_key: pairKey,
-      language: languagePref,
-      conversation_id,
-    },
-  });
+  try {
+    await inngest.send({
+      name: 'conversation/start',
+      data: {
+        user_id: worldUserId,
+        surface: 'dating',
+        agent_a_id: ownAgentId,
+        agent_b_id: candidateAgentId,
+        pair_key: pairKey,
+        language: languagePref,
+        conversation_id,
+      },
+    });
+  } catch (err) {
+    console.error('[stroll/spawn] inngest.send failed — marking conversation failed', err);
+    await supabase.from('conversations').update({ status: 'failed' }).eq('id', conversation_id);
+    void captureServer('stroll_spawn_inngest_failed', {
+      worldUserId,
+      properties: {
+        conversation_id,
+        error_message: err instanceof Error ? err.message : String(err),
+      },
+    });
+    return NextResponse.json({ error: 'spawn_failed', conversation_id }, { status: 503 });
+  }
 
   // ── Record outcome_event (counts toward quota) ────────────────────────────
-  await supabase.from('outcome_events').insert({
+  const { error: insertError } = await supabase.from('outcome_events').insert({
     user_id: worldUserId,
     event_type: 'viewed',
     source_screen: 'stroll',
     metadata: { candidate_user_id: candidate_user_id, agent_b_id: candidateAgentId },
   });
+
+  if (insertError) {
+    // Graceful degradation: the Inngest event already fired and the
+    // conversation is live. Quota tracking is slightly off — log + capture
+    // for alerting but do NOT fail the request.
+    console.error(
+      '[stroll/spawn] outcome_events insert failed (quota undercount risk)',
+      insertError,
+    );
+    void captureServer('quota_undercount_warning', {
+      worldUserId,
+      properties: {
+        conversation_id,
+        error_message: insertError.message,
+      },
+    });
+  }
 
   return NextResponse.json({ conversation_id });
 }

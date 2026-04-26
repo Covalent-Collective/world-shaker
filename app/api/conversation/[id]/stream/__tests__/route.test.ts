@@ -146,6 +146,8 @@ async function callRoute(
   opts: {
     cookie?: { value: string };
     lastEventId?: string;
+    /** Pass lastEventId via ?lastEventId= query param instead of / in addition to header. */
+    lastEventIdQuery?: string;
   } = {},
 ): Promise<Response> {
   if (opts.cookie) cookieGet.mockReturnValue(opts.cookie);
@@ -155,7 +157,8 @@ async function callRoute(
   if (opts.lastEventId !== undefined) {
     headers.set('Last-Event-ID', opts.lastEventId);
   }
-  const req = new Request(`http://test/api/conversation/${CONV_ID}/stream`, {
+  const qs = opts.lastEventIdQuery !== undefined ? `?lastEventId=${opts.lastEventIdQuery}` : '';
+  const req = new Request(`http://test/api/conversation/${CONV_ID}/stream${qs}`, {
     method: 'GET',
     headers,
   });
@@ -399,6 +402,61 @@ describe('GET /api/conversation/[id]/stream — Realtime dedup', () => {
     const occurrences = out.split('id: 3\n').length - 1;
     expect(occurrences).toBe(1);
 
+    await reader.cancel();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// US-411b: Last-Event-ID query-param fallback (?lastEventId=N)
+// ---------------------------------------------------------------------------
+
+describe('GET /api/conversation/[id]/stream — lastEventId query param fallback', () => {
+  it('replays turns above floor when lastEventId supplied as query param (no header)', async () => {
+    const token = await tokenFor(WORLD_USER);
+    setOwner(WORLD_USER);
+    replayStub.data = [
+      { turn_index: 6, text: 'six', speaker_agent_id: 'a' },
+      { turn_index: 7, text: 'seven', speaker_agent_id: 'b' },
+    ];
+
+    // ?lastEventId=5 with NO Last-Event-ID header — should behave identically
+    // to passing Last-Event-ID: 5 header (replay only turns > 5).
+    const res = await callRoute({
+      cookie: { value: token },
+      lastEventIdQuery: '5',
+      // lastEventId header intentionally omitted
+    });
+
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const text = await readUntil(reader, (acc) => acc.includes('id: 7\n'));
+
+    expect(text).toContain('id: 6\n');
+    expect(text).toContain('id: 7\n');
+    expect(text).toContain('"text":"six"');
+    expect(text).toContain('"text":"seven"');
+
+    await reader.cancel();
+  });
+
+  it('header takes precedence over query param when both are present', async () => {
+    const token = await tokenFor(WORLD_USER);
+    setOwner(WORLD_USER);
+    // header says floor=3, query param says floor=1 — header wins
+    replayStub.data = [{ turn_index: 4, text: 'four', speaker_agent_id: 'a' }];
+
+    const res = await callRoute({
+      cookie: { value: token },
+      lastEventId: '3', // header
+      lastEventIdQuery: '1', // query param — should be ignored (header wins)
+    });
+
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    const text = await readUntil(reader, (acc) => acc.includes('id: 4\n'));
+    // turn 4 appears (above floor=3); turns 2 and 3 are absent from replayStub
+    // confirming the floor came from the header (3), not the query param (1).
+    expect(text).toContain('id: 4\n');
     await reader.cancel();
   });
 });

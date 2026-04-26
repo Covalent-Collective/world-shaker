@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 
 import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
 import { inngest } from '@/lib/inngest/client';
+import { assertQuotaAvailable, getDailyQuota } from '@/lib/quota/daily';
 import { getServiceClient } from '@/lib/supabase/service';
 
 export const runtime = 'nodejs';
@@ -72,6 +73,22 @@ export async function POST(
 
   if (conv.status !== 'failed') {
     return NextResponse.json({ error: 'not_failed' }, { status: 409 });
+  }
+
+  const quotaCheck = await assertQuotaAvailable(worldUserId);
+  if (!quotaCheck.ok) {
+    // Record wont_connect outcome so the client can surface feedback.
+    await supabase.from('outcome_events').insert({
+      user_id: worldUserId,
+      conversation_id: id,
+      event_type: 'wont_connect',
+      metadata: { reason: 'quota_exceeded' },
+    });
+    const { nextResetAt } = await getDailyQuota(worldUserId);
+    return NextResponse.json(
+      { error: 'quota_exceeded', retry_at: nextResetAt.toISOString() },
+      { status: 429 },
+    );
   }
 
   await inngest.send({
