@@ -3,8 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 
 import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
-import VerifiedHumanBadge from '@/components/world/VerifiedHumanBadge';
-import LiveTranscript from '@/components/conversation/LiveTranscript';
+import EncounterStage from '@/components/encounter/EncounterStage';
 import type { ConversationStatus } from '@/types/db';
 
 export const dynamic = 'force-dynamic';
@@ -77,17 +76,10 @@ export default async function ConversationPage({
   const lastEventId = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
 
   return (
-    <main className="min-h-dvh p-6 space-y-6">
-      <header className="flex items-center justify-between">
-        <h1 className="font-serif text-2xl leading-tight">{conv.id.slice(0, 8)}</h1>
-        <VerifiedHumanBadge variant="compact" />
-      </header>
-
-      <LiveTranscript
-        conversationId={conv.id}
-        initialStatus={conv.status as ConversationStatus}
-        initialLastEventId={lastEventId}
-      />
-    </main>
+    <EncounterStage
+      conversationId={conv.id}
+      initialStatus={conv.status as ConversationStatus}
+      initialLastEventId={lastEventId}
+    />
   );
 }

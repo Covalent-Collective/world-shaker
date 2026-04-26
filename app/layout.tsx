@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Crimson_Pro } from 'next/font/google';
+import { Inter, Crimson_Pro, Noto_Serif_KR } from 'next/font/google';
 import { cookies } from 'next/headers';
 import './globals.css';
 import { Providers } from './providers';
@@ -18,6 +18,12 @@ const crimsonPro = Crimson_Pro({
   weight: ['400', '500', '600', '700'],
   style: ['normal', 'italic'],
   variable: '--font-crimson',
+});
+
+const notoSerifKR = Noto_Serif_KR({
+  subsets: ['latin'],
+  weight: ['400', '500', '700'],
+  variable: '--font-noto-serif-kr',
 });
 
 export const metadata: Metadata = {
@@ -44,7 +50,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const lang: Lang = isLang(rawLang) ? rawLang : 'ko';
 
   return (
-    <html lang={lang} className={`dark ${inter.variable} ${crimsonPro.variable}`}>
+    <html
+      lang={lang}
+      className={`dark ${inter.variable} ${crimsonPro.variable} ${notoSerifKR.variable}`}
+    >
       <body className="bg-bg text-text font-sans antialiased">
         <LangProvider lang={lang}>
           <Providers>{children}</Providers>

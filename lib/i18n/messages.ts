@@ -64,6 +64,15 @@ const ko = {
   'safety.report_reason.other': '기타',
   'safety.detail_placeholder': '추가로 알려주실 내용 (선택)',
   'safety.hide_and_report': '숨기고 신고하기',
+  'home.preparing.label': '한 막의 시작',
+  'home.preparing.title': '당신의 클론이\n무대로 향합니다',
+  'home.preparing.body': '잠시만요. 곧 첫 만남의 막이 오릅니다.',
+  'encounter.titlecard.label': 'Encounter № 1',
+  'encounter.titlecard.subtitle': '낯선 두 사람,\n같은 빛 아래.',
+  'encounter.header': 'World Shaker · 첫 만남',
+  'encounter.scenelabel': '하나의 테이블',
+  'encounter.fin': '— 막을 내립니다 —',
+  'encounter.abandoned': '대화가 잠시 멈췄습니다.',
 } as const satisfies Record<MessageKey, string>;
 
 const en = {
@@ -130,6 +139,15 @@ const en = {
   'safety.report_reason.other': 'Other',
   'safety.detail_placeholder': 'Anything else? (optional)',
   'safety.hide_and_report': 'Hide and report',
+  'home.preparing.label': 'A scene in waiting',
+  'home.preparing.title': 'Your clone is\nstepping onto the stage',
+  'home.preparing.body': 'A moment more. The first encounter is about to begin.',
+  'encounter.titlecard.label': 'Encounter № 1',
+  'encounter.titlecard.subtitle': 'Two strangers,\nunder the same light.',
+  'encounter.header': 'World Shaker · First Encounter',
+  'encounter.scenelabel': 'One Table',
+  'encounter.fin': '— curtain —',
+  'encounter.abandoned': 'The conversation paused.',
 } as const satisfies Record<MessageKey, string>;
 
 export const messages = { ko, en } as const satisfies Record<Lang, Record<MessageKey, string>>;
