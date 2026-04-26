@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { cookies } from 'next/headers';
 import { verifyWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
+import { rateLimit } from '@/lib/auth/rate-limit';
 import { getServiceClient } from '@/lib/supabase/service';
 
 export const runtime = 'nodejs';
@@ -33,6 +34,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  // Rate limit
+  const rl = await rateLimit({
+    world_user_id: claims.world_user_id,
+    bucket_key: 'report',
+    max: 10,
+    windowSeconds: 60,
+  });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: 'rate_limit_exceeded' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSeconds) } },
+    );
+  }
+
   // Validate body
   const parsed = Body.safeParse(await req.json());
   if (!parsed.success) {
@@ -56,6 +71,17 @@ export async function POST(req: Request) {
     }
     console.error('report insert error:', error);
     return NextResponse.json({ error: 'report_failed' }, { status: 500 });
+  }
+
+  // ── Record outcome_event ──────────────────────────────────────────────────
+  const { error: eventError } = await supabase.from('outcome_events').insert({
+    user_id: claims.world_user_id,
+    event_type: 'report_filed',
+    source_screen: 'safety_menu',
+    metadata: { reported_user_id, reason },
+  });
+  if (eventError) {
+    console.error('[report] outcome_events insert failed:', eventError);
   }
 
   return NextResponse.json({ reported: true });

@@ -30,7 +30,7 @@ export const dailyDigest = inngest.createFunction(
   {
     id: 'daily-digest',
     name: 'Daily Digest Push',
-    triggers: [{ cron: '22 0 * * *' }], // 22:00 UTC nightly
+    triggers: [{ cron: '0 22 * * *' }], // 22:00 UTC nightly
   },
   async ({ step, logger }) => {
     const supabase = getServiceClient();

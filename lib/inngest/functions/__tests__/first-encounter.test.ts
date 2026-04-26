@@ -80,6 +80,15 @@ vi.mock('@/lib/supabase/service', () => ({
           },
         };
       }
+      if (table === 'app_settings') {
+        return {
+          select: () => ({
+            limit: () => ({
+              single: () => Promise.resolve({ data: { seed_pool_active: true }, error: null }),
+            }),
+          }),
+        };
+      }
       throw new Error(`unexpected table: ${table}`);
     },
   }),
