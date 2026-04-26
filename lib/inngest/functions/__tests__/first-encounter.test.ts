@@ -31,11 +31,12 @@ vi.mock('@/lib/quota/daily', () => ({ getDailyQuota }));
 // ---------------------------------------------------------------------------
 
 const dbState = {
-  candidates: [] as Array<{ candidate_user: string; score: number }>,
+  candidates: [] as Array<{ candidate_user: string; score: number; is_seed?: boolean }>,
   candidateAgent: null as { id: string; user_id: string } | null,
   agent: null as { avatar_url: string | null; extracted_features: Record<string, unknown> } | null,
   outcomeInserts: [] as unknown[],
   rpcCalls: [] as Array<{ fn: string; args: unknown }>,
+  seedPoolActive: true,
 };
 
 function makeAgentsSelect(_cols: string): unknown {
@@ -84,7 +85,11 @@ vi.mock('@/lib/supabase/service', () => ({
         return {
           select: () => ({
             limit: () => ({
-              single: () => Promise.resolve({ data: { seed_pool_active: true }, error: null }),
+              single: () =>
+                Promise.resolve({
+                  data: { seed_pool_active: dbState.seedPoolActive },
+                  error: null,
+                }),
             }),
           }),
         };
@@ -131,6 +136,7 @@ describe('firstEncounter Inngest fn', () => {
     dbState.agent = null;
     dbState.outcomeInserts = [];
     dbState.rpcCalls = [];
+    dbState.seedPoolActive = true;
   });
 
   it('happy path: spawns conversation/start with is_first_encounter=true (no pair_key in payload)', async () => {
@@ -138,7 +144,7 @@ describe('firstEncounter Inngest fn', () => {
     const candidate_user = 'user-bbb';
     const candidate_agent_id = 'agent-bbb';
 
-    dbState.candidates = [{ candidate_user, score: 0.91 }];
+    dbState.candidates = [{ candidate_user, score: 0.91, is_seed: false }];
     dbState.candidateAgent = { id: candidate_agent_id, user_id: candidate_user };
     dbState.agent = { avatar_url: null, extracted_features: { tone: 'warm' } };
 
@@ -216,6 +222,43 @@ describe('firstEncounter Inngest fn', () => {
     await expect(handler(makeCtx({ user_id: '', agent_id: '' }))).rejects.toThrow(
       /missing user_id or agent_id/,
     );
+  });
+
+  it('filters out seed candidates when seed_pool_active=false', async () => {
+    dbState.seedPoolActive = false;
+    // Two candidates: seed + non-seed. Only non-seed should survive the filter.
+    dbState.candidates = [
+      { candidate_user: 'user-seed', score: 0.95, is_seed: true },
+      { candidate_user: 'user-real', score: 0.8, is_seed: false },
+    ];
+    dbState.candidateAgent = { id: 'agent-real', user_id: 'user-real' };
+    dbState.agent = { avatar_url: '/avatar.png', extracted_features: {} };
+
+    const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id: 'agent-aaa' }))) as {
+      spawned: boolean;
+      candidate_user_id?: string;
+    };
+
+    expect(result.spawned).toBe(true);
+    // Must have picked the non-seed candidate, not the higher-scoring seed.
+    expect(result.candidate_user_id).toBe('user-real');
+  });
+
+  it('returns no_candidate when seed_pool_active=false and all candidates are seeds', async () => {
+    dbState.seedPoolActive = false;
+    dbState.candidates = [
+      { candidate_user: 'user-seed-1', score: 0.99, is_seed: true },
+      { candidate_user: 'user-seed-2', score: 0.88, is_seed: true },
+    ];
+
+    const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id: 'agent-aaa' }))) as {
+      spawned: boolean;
+      reason?: string;
+    };
+
+    expect(result.spawned).toBe(false);
+    expect(result.reason).toBe('no_candidate');
+    expect(stepSendEvent).not.toHaveBeenCalled();
   });
 
   it('inserts wont_connect outcome and returns early when daily quota is exceeded', async () => {

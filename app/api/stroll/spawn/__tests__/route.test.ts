@@ -184,11 +184,11 @@ describe('POST /api/stroll/spawn', () => {
     // outcome_events insert
     const insertChain = buildChain({ error: null });
 
-    // match_candidates RPC returns our candidate (keyed by user id).
+    // match_candidates RPC returns our candidate (keyed by user id) with is_seed.
     // allocate_conversation_attempt RPC returns a synthetic conversation_id.
     mockRpc
       .mockResolvedValueOnce({
-        data: [{ candidate_user: CANDIDATE_USER_ID }],
+        data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.9, is_seed: false }],
         error: null,
       })
       .mockResolvedValueOnce({
@@ -259,7 +259,7 @@ describe('POST /api/stroll/spawn', () => {
 
     mockRpc
       .mockResolvedValueOnce({
-        data: [{ candidate_user: CANDIDATE_USER_ID }],
+        data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.9, is_seed: false }],
         error: null,
       })
       .mockResolvedValueOnce({
@@ -316,7 +316,7 @@ describe('POST /api/stroll/spawn', () => {
 
     mockRpc
       .mockResolvedValueOnce({
-        data: [{ candidate_user: CANDIDATE_USER_ID }],
+        data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.9, is_seed: false }],
         error: null,
       })
       .mockResolvedValueOnce({
@@ -344,5 +344,75 @@ describe('POST /api/stroll/spawn', () => {
       'quota_undercount_warning',
       expect.objectContaining({ worldUserId: DEFAULT_CLAIMS.world_user_id }),
     );
+  });
+
+  // ── seed_pool_active=false: seed candidates filtered out ─────────────────
+
+  it('returns 404 candidate_not_found when seed_pool_active=false and candidate is a seed', async () => {
+    mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
+    mockRateLimit.mockResolvedValue({ ok: true, retryAfterSeconds: 0, remaining: 9 });
+    mockGetDailyQuota.mockResolvedValue({ used: 1, max: 4, nextResetAt: new Date() });
+
+    // seed_pool_active=false
+    const settingsChain = buildChain({
+      data: { streaming_paused: false, seed_pool_active: false },
+      error: null,
+    });
+
+    // match_candidates returns only a seed candidate
+    mockRpc.mockResolvedValueOnce({
+      data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.95, is_seed: true }],
+      error: null,
+    });
+
+    mockFrom.mockReturnValueOnce(settingsChain);
+
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'valid-token');
+    const res = await POST(req);
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error).toBe('candidate_not_found');
+  });
+
+  it('returns 200 when seed_pool_active=false and candidate is a non-seed real user', async () => {
+    const SYNTHETIC_CONVERSATION_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
+    mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
+    mockRateLimit.mockResolvedValue({ ok: true, retryAfterSeconds: 0, remaining: 9 });
+    mockGetDailyQuota.mockResolvedValue({ used: 1, max: 4, nextResetAt: new Date() });
+    mockInngestSend.mockResolvedValue(undefined);
+
+    // seed_pool_active=false but candidate is NOT a seed
+    const settingsChain = buildChain({
+      data: { streaming_paused: false, seed_pool_active: false },
+      error: null,
+    });
+    const ownAgentChain = buildChain({ data: { id: OWN_AGENT_ID }, error: null });
+    const candidateAgentChain = buildChain({ data: { id: CANDIDATE_AGENT_ID }, error: null });
+    const insertChain = buildChain({ error: null });
+
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.85, is_seed: false }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: SYNTHETIC_CONVERSATION_ID,
+        error: null,
+      });
+
+    mockFrom
+      .mockReturnValueOnce(settingsChain)
+      .mockReturnValueOnce(ownAgentChain)
+      .mockReturnValueOnce(candidateAgentChain)
+      .mockReturnValueOnce(insertChain);
+
+    const req = makeRequest({ candidate_user_id: CANDIDATE_USER_ID }, 'valid-token');
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.conversation_id).toBe(SYNTHETIC_CONVERSATION_ID);
   });
 });
