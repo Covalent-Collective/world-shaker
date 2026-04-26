@@ -50,7 +50,15 @@ export default function WorldChatCta({
 
     try {
       if (MiniKit.isInstalled()) {
-        const result = await MiniKit.commandsAsync.chat({ message });
+        // Pass the partner's q0_name as a username candidate when present.
+        // If the World App resolves it to a real handle the recipient is
+        // pre-selected in the Select Conversations sheet; if not, the
+        // sheet still opens with the message draft and the user picks
+        // the recipient manually. Real recipient resolution will use
+        // MiniKit.getUserByAddress once wallet-auth captures wallet
+        // addresses on verify.
+        const to = trimmed.length > 0 ? [trimmed] : undefined;
+        const result = await MiniKit.commandsAsync.chat({ to, message });
         if (result.finalPayload.status === 'success') {
           // World Chat composer took over; the World App handles the rest.
           // Nothing more for this view to do — leave busy so the button
