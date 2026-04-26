@@ -3,6 +3,7 @@ import 'server-only';
 import {
   WORLD_ACTION,
   WORLD_ENVIRONMENT,
+  WORLD_APP_ID,
   WORLD_RP_ID,
   REQUIRED_VERIFICATION_LEVEL,
 } from './constants';
@@ -41,29 +42,24 @@ export async function generateRpContext({ signal }: { signal?: string }) {
 }
 
 /**
- * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal
- * v2. The MiniApp context delivers proofs through MiniKit, not IDKit web flow,
- * so v2 (flat body, app_id in path) is the matching endpoint shape.
+ * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal v2.
  *
- * Per Codex review HIGH-2 we still enforce:
- *   - data.action equals our configured WORLD_ACTION
- *   - data.verification_level === 'orb' (REQUIRED_VERIFICATION_LEVEL)
- *
- * Without these checks, any proof from any other action / device level would
- * be accepted, breaking the orb-only one-human-one-account gate.
+ * Inside the World App, MiniKit produces a flat ISuccessResult; we forward it
+ * along with our server-pinned action so the proof's action binding is checked
+ * by Dev Portal, then reassert action and verification_level on the response so
+ * a proof from a different action / device level can never be accepted.
  */
+
+const VERIFY_TIMEOUT_MS = 8000;
+
 export async function verifyWithDevPortal(
   payload: unknown,
 ): Promise<
   { ok: true; nullifier: string; verification_level: 'orb' } | { ok: false; error: string }
 > {
-  if (!WORLD_RP_ID) {
-    return { ok: false, error: 'rp_id_missing' };
+  if (!WORLD_APP_ID) {
+    return { ok: false, error: 'app_id_missing' };
   }
-  // Dev Portal v4 verify endpoint — accepts v3 protocol bodies for legacy
-  // proofs. MiniKit v1 `verify` finalPayload is flat (ISuccessResult);
-  // wrap into the v3 protocol body shape for forwarding.
-  const url = `https://developer.world.org/api/v4/verify/${WORLD_RP_ID}`;
   if (!payload || typeof payload !== 'object') {
     return { ok: false, error: 'invalid_payload' };
   }
@@ -76,36 +72,30 @@ export async function verifyWithDevPortal(
   if (!p.proof || !p.merkle_root || !p.nullifier_hash) {
     return { ok: false, error: 'invalid_idkit_payload' };
   }
+
+  const url = `https://developer.worldcoin.org/api/v2/verify/${WORLD_APP_ID}`;
   const body = {
-    protocol_version: '3.0',
-    nonce: crypto.randomUUID(),
+    merkle_root: p.merkle_root,
+    nullifier_hash: p.nullifier_hash,
+    proof: p.proof,
+    verification_level: p.verification_level ?? REQUIRED_VERIFICATION_LEVEL,
     action: WORLD_ACTION,
-    environment: WORLD_ENVIRONMENT,
-    responses: [
-      {
-        identifier: p.verification_level === 'orb' ? 'orb' : 'device',
-        proof: p.proof,
-        merkle_root: p.merkle_root,
-        nullifier: p.nullifier_hash,
-      },
-    ],
   };
   console.log(
     '[verify] forward to dev portal',
     JSON.stringify({
       url,
       action: body.action,
-      environment: body.environment,
-      protocol_version: body.protocol_version,
-      response_count: body.responses.length,
-      identifier: body.responses[0]?.identifier,
+      verification_level: body.verification_level,
     }),
   );
+
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(VERIFY_TIMEOUT_MS),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -121,7 +111,15 @@ export async function verifyWithDevPortal(
       verification_level?: string;
     };
 
-    console.log('[verify] dev portal success', JSON.stringify(data).slice(0, 600));
+    // Log only non-sensitive shape signals — never the nullifier_hash itself.
+    console.log(
+      '[verify] dev portal success',
+      JSON.stringify({
+        success: data.success,
+        action_match: data.action === WORLD_ACTION,
+        verification_level: data.verification_level,
+      }),
+    );
 
     if (!data.success || typeof data.nullifier_hash !== 'string') {
       return { ok: false, error: 'dev_portal_rejected' };
@@ -139,9 +137,12 @@ export async function verifyWithDevPortal(
     return {
       ok: true,
       nullifier: data.nullifier_hash,
-      verification_level: 'orb',
+      verification_level: REQUIRED_VERIFICATION_LEVEL,
     };
   } catch (err) {
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return { ok: false, error: 'network_timeout' };
+    }
     return { ok: false, error: `network_${(err as Error).message}` };
   }
 }
