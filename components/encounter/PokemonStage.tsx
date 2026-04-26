@@ -79,6 +79,11 @@ export default function PokemonStage({
   const [revealComplete, setRevealComplete] = useState(false);
   const [popupDismissed, setPopupDismissed] = useState(false);
   const [handoffPending, setHandoffPending] = useState(false);
+  // `firstShown` mirrors `firstShownRef.current` as render-visible state.
+  // The ref is the synchronous source-of-truth used inside the SSE handler;
+  // the state lets render branches (FailureOverlay, soft-failure end popup)
+  // depend on it without violating the no-refs-during-render rule.
+  const [firstShown, setFirstShown] = useState(false);
   const router = useRouter();
 
   const lastEventIdRef = useRef<number>(initialLastEventId);
@@ -96,12 +101,13 @@ export default function PokemonStage({
     return () => clearTimeout(tm);
   }, [seated]);
 
-  // SSE — subscribe once seated, regardless of live/completed status. The
-  // server replays existing turns first, then emits `complete` for terminal
-  // statuses. Only `failed` / `abandoned` short-circuit the subscription.
+  // SSE — subscribe once seated, regardless of status. Even `failed` /
+  // `abandoned` convs may have generated useful turns before they died,
+  // and the demo wants those to replay (we soft-route past the failure
+  // when at least one turn made it through). The server replays existing
+  // turns first, then emits `complete` with the terminal status.
   useEffect(() => {
     if (!seated) return;
-    if (status === 'failed' || status === 'abandoned') return;
 
     const showFirstIfReady = (): void => {
       if (firstShownRef.current) return;
@@ -109,6 +115,7 @@ export default function PokemonStage({
       if (!next) return;
       setLatest(next);
       firstShownRef.current = true;
+      setFirstShown(true);
       if (next.turn_index > lastEventIdRef.current) {
         lastEventIdRef.current = next.turn_index;
       }
@@ -170,7 +177,6 @@ export default function PokemonStage({
     // Intentionally omit `status` from deps — status changes happen INSIDE
     // this effect via handleComplete; resubscribing on every change would
     // tear down + recreate the EventSource for no reason.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seated, conversationId]);
 
   // Tap-to-advance: pulls the next turn off the queue. Caller is the
@@ -182,6 +188,7 @@ export default function PokemonStage({
     if (next) {
       setLatest(next);
       firstShownRef.current = true;
+      setFirstShown(true);
       if (next.turn_index > lastEventIdRef.current) {
         lastEventIdRef.current = next.turn_index;
       }
@@ -217,8 +224,15 @@ export default function PokemonStage({
   const speakerASpeaking = latest?.speaker === 'A' && (isLive || !revealComplete);
   const speakerBSpeaking = latest?.speaker === 'B' && (isLive || !revealComplete);
   const walking = !seated;
-  const showEndPopup = revealComplete && status === 'completed' && !popupDismissed;
-  const showFinStrip = revealComplete && status === 'completed';
+  // Soft-failure: a `failed` conv with at least one streamed turn is
+  // treated as "good enough to demo" — we fire the end popup and skip the
+  // FailureOverlay. Only fully-empty failures show the overlay so users
+  // who never saw any dialogue still get a recovery affordance.
+  const hasAnyTurns = firstShown;
+  const treatAsCompleted = status === 'completed' || (status === 'failed' && hasAnyTurns);
+  const showEndPopup = revealComplete && treatAsCompleted && !popupDismissed;
+  const showFinStrip = revealComplete && treatAsCompleted;
+  const showFailureOverlay = status === 'failed' && !hasAnyTurns;
   // ▼ blink rules: any time we're still mid-encounter (not yet
   // revealComplete) and have shown at least the first turn. Suppressed
   // automatically once the popup takes over because revealComplete flips.
@@ -323,7 +337,7 @@ export default function PokemonStage({
           />
         ) : null}
 
-        {status === 'failed' ? <FailureOverlay conversationId={conversationId} /> : null}
+        {showFailureOverlay ? <FailureOverlay conversationId={conversationId} /> : null}
       </section>
 
       {showEndPopup ? (

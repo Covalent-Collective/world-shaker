@@ -129,13 +129,15 @@ export default async function HomePage(): Promise<React.ReactElement> {
     );
   }
 
-  // Case 3: Conversation completed but no match yet → route the user back
-  // to the encounter viewer so they can replay (and finish via the
-  // end-of-encounter CTA). The old "Generating report…" interstitial stalls
-  // forever when the report-generation pipeline hasn't created a match row,
-  // and forces the user to wait through a state they can't act on. Routing
-  // straight to /conversation/[id] keeps the loop closed end-to-end.
-  if (convRow?.status === 'completed' && !matchRow) {
+  // Case 3: Conversation completed (or failed mid-stream — the soft
+  // failure path) but no match yet → route the user back to the encounter
+  // viewer so they can replay and finish via the end-of-encounter CTA.
+  // The old "Generating report…" interstitial stalls forever when the
+  // report-generation pipeline hasn't created a match row, and forces the
+  // user to wait through a state they can't act on. PokemonStage handles
+  // the failed-with-turns case as "show what made it through" so failed
+  // convs with content still demo cleanly.
+  if ((convRow?.status === 'completed' || convRow?.status === 'failed') && !matchRow) {
     redirect(`/conversation/${convRow.id}`);
   }
 
