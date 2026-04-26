@@ -140,7 +140,10 @@ describe('firstEncounter Inngest fn', () => {
     getDailyQuota.mockResolvedValue({ used: 0, max: 4, nextResetAt: new Date() });
     dbState.candidates = [];
     dbState.candidateAgent = null;
-    dbState.agent = null;
+    // Default agent record so the new ensure-embedding step (which fires
+    // before pick-candidate and before avatar) can resolve the row. Tests
+    // that need a different shape override this explicitly.
+    dbState.agent = { avatar_url: null, extracted_features: {} };
     dbState.outcomeInserts = [];
     dbState.rpcCalls = [];
     dbState.seedPoolActive = true;
