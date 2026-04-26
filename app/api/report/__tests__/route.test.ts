@@ -303,6 +303,7 @@ describe('POST /api/report', () => {
     expect(lastOutcomeEventPayload).toMatchObject({
       event_type: 'report_filed',
       source_screen: 'safety_menu',
+      match_id: MATCH_ID,
       metadata: {
         reported_user_id: REPORTED_ID,
         reason: 'catfish',
