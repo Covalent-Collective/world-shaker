@@ -26,6 +26,7 @@ lib/avatar/generate.ts
 app/api/match/[id]/like/route.ts
 app/api/match/[id]/world-chat-replied/route.ts
 app/api/encounter/[id]/handoff/route.ts
+app/api/user/world-profile/route.ts
 app/api/stroll/spawn/route.ts
 app/(app)/stroll/page.tsx
 app/(app)/conversation/[id]/page.tsx

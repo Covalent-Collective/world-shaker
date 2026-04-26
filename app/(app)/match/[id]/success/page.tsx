@@ -38,9 +38,12 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
 
   if (!match) notFound();
 
-  // Resolve the partner's q0_name (their agent's interview answer) so the
-  // World Chat draft message can address them by the name they chose.
+  // Resolve the partner's q0_name (display name; for the draft message)
+  // and q0_world_username (real World App handle, captured by
+  // WorldProfileCapture on their MiniKit-side page-load; for the
+  // recipient picker pre-fill).
   let partnerName: string | null = null;
+  let partnerWorldUsername: string | null = null;
   if (match.candidate_user_id) {
     const { data: partnerAgent } = await db
       .from('agents')
@@ -48,9 +51,14 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
       .eq('user_id', match.candidate_user_id)
       .eq('status', 'active')
       .maybeSingle();
-    const raw = (partnerAgent?.interview_answers as Record<string, unknown> | null)?.q0_name;
-    if (typeof raw === 'string' && raw.trim().length > 0) {
-      partnerName = raw.trim();
+    const answers = (partnerAgent?.interview_answers as Record<string, unknown> | null) ?? null;
+    const rawName = answers?.q0_name;
+    if (typeof rawName === 'string' && rawName.trim().length > 0) {
+      partnerName = rawName.trim();
+    }
+    const rawHandle = answers?.q0_world_username;
+    if (typeof rawHandle === 'string' && rawHandle.trim().length > 0) {
+      partnerWorldUsername = rawHandle.trim();
     }
   }
 
@@ -72,7 +80,11 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
         </section>
       )}
 
-      <WorldChatCta partnerName={partnerName} fallbackUrl={worldChatLink} />
+      <WorldChatCta
+        partnerName={partnerName}
+        partnerWorldUsername={partnerWorldUsername}
+        fallbackUrl={worldChatLink}
+      />
     </main>
   );
 }
