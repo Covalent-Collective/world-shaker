@@ -57,6 +57,12 @@ export type ConversationStartPayload = {
   /** Set to true when this conversation was spawned by the first-encounter pipeline.
    *  Forwarded to conversation.completed so generate-report can stamp the match row. */
   is_first_encounter?: boolean;
+  /**
+   * If the caller pre-allocated the conversation row (e.g. stroll/spawn route),
+   * supply the UUID here. When present, the allocate-attempt step is skipped and
+   * this id is used directly — avoiding a duplicate allocation attempt.
+   */
+  conversation_id?: string;
 };
 
 interface AgentRow {

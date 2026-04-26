@@ -147,7 +147,28 @@ export async function POST(req: Request): Promise<Response> {
       ? `${ownAgentId}|${candidateAgentId}`
       : `${candidateAgentId}|${ownAgentId}`;
 
-  // ── Send Inngest event ────────────────────────────────────────────────────
+  // ── Pre-allocate conversation row synchronously ───────────────────────────
+  // Calling the RPC here (before Inngest) gives us a concrete conversation_id
+  // to return in the response. The Inngest function then skips its own
+  // allocate-attempt step and uses the supplied id directly.
+  const { data: conversationId, error: allocErr } = await supabase.rpc(
+    'allocate_conversation_attempt',
+    {
+      p_surface: 'dating',
+      p_pair_key: pairKey,
+      p_agent_a: ownAgentId,
+      p_agent_b: candidateAgentId,
+    },
+  );
+
+  if (allocErr || !conversationId) {
+    console.error('[stroll/spawn] allocate_conversation_attempt failed', allocErr);
+    return NextResponse.json({ error: 'allocate_failed' }, { status: 500 });
+  }
+
+  const conversation_id = conversationId as string;
+
+  // ── Send Inngest event (skip allocate step — id pre-allocated above) ──────
   await inngest.send({
     name: 'conversation/start',
     data: {
@@ -157,6 +178,7 @@ export async function POST(req: Request): Promise<Response> {
       agent_b_id: candidateAgentId,
       pair_key: pairKey,
       language: languagePref,
+      conversation_id,
     },
   });
 
@@ -168,5 +190,5 @@ export async function POST(req: Request): Promise<Response> {
     metadata: { candidate_user_id: candidate_user_id, agent_b_id: candidateAgentId },
   });
 
-  return NextResponse.json({ conversation_id_pending: true });
+  return NextResponse.json({ conversation_id });
 }

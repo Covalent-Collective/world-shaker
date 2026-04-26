@@ -39,15 +39,24 @@ export default async function HomePage(): Promise<React.ReactElement> {
   const db = getServiceClient();
 
   // ── Active agent ──────────────────────────────────────────────────────────
+  // Also fetch interview_answers so we can verify the user finished onboarding.
+  // First answer of the interview inserts an active agent row, but until the
+  // interview_complete sentinel is set the user should still be sent back to
+  // /onboarding/interview rather than the home decision tree.
   const { data: agentRow } = await db
     .from('agents')
-    .select('id')
+    .select('id, interview_answers')
     .eq('user_id', worldUserId)
     .eq('status', 'active')
     .limit(1)
     .maybeSingle();
 
   if (!agentRow) {
+    redirect('/onboarding/interview');
+  }
+
+  const interviewAnswers = (agentRow.interview_answers as Record<string, string> | null) ?? {};
+  if (!interviewAnswers.interview_complete) {
     redirect('/onboarding/interview');
   }
 
@@ -62,17 +71,23 @@ export default async function HomePage(): Promise<React.ReactElement> {
     .limit(1)
     .maybeSingle();
 
-  // ── Most recent match for user with pending/accepted status ───────────────
+  // ── Most recent match for user with active status ─────────────────────────
+  // Includes mutual so the home page can route to /match/[id]/success.
   const { data: matchRow } = await db
     .from('matches')
     .select('id, status')
     .eq('user_id', worldUserId)
-    .in('status', ['pending', 'accepted'])
+    .in('status', ['pending', 'accepted', 'mutual'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   // ── Decision tree ─────────────────────────────────────────────────────────
+
+  // Case 0: Mutual match → success/handoff page
+  if (matchRow?.status === 'mutual') {
+    redirect(`/match/${matchRow.id}/success`);
+  }
 
   // Case 1: Pending/accepted match → encounter ready CTA
   if (matchRow?.status === 'pending' || matchRow?.status === 'accepted') {

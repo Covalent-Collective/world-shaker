@@ -12,7 +12,6 @@ interface StrollClientProps {
 }
 
 interface SpawnResponse {
-  conversation_id_pending?: boolean;
   conversation_id?: string;
   error?: string;
   reason?: string;
@@ -51,10 +50,12 @@ export default function StrollClient({
         return;
       }
 
-      // Navigate to the conversation. If a concrete id is available use it,
-      // otherwise use the 'pending' placeholder route so the client can poll.
-      const convId = data.conversation_id ?? 'pending';
-      router.push(`/conversation/${convId}`);
+      // Navigate directly to the allocated conversation.
+      if (!data.conversation_id) {
+        toast.error('spawn_no_id');
+        return;
+      }
+      router.push(`/conversation/${data.conversation_id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'unknown_error');
     } finally {
