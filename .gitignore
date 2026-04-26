@@ -25,4 +25,5 @@ types/db.gen.ts
 !.omc/plans/
 !.omc/plans/**
 .omx/
+.claude/scheduled_tasks.lock
 
