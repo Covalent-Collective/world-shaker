@@ -74,6 +74,10 @@ interface AgentRow {
   id: string;
   user_id: string;
   extracted_features: ExtractedFeatures | null;
+  /** Raw Q→A jsonb from the interview surface. Carried into the dialogue
+   *  prompt so each agent reflects its owner's actual answers, not just
+   *  the (often empty) extracted_features bag. */
+  interview_answers: Record<string, unknown> | null;
 }
 
 function inferStage(turn_index: number): 'opening' | 'probing' | 'landing' {
@@ -214,7 +218,7 @@ export const liveConversation = inngest.createFunction(
     const { agentA, agentB } = await step.run('load-agents', async () => {
       const { data, error } = await supabase
         .from('agents')
-        .select('id, user_id, extracted_features')
+        .select('id, user_id, extracted_features, interview_answers')
         .in('id', [agent_a_id, agent_b_id]);
       if (error) throw new Error(`load-agents failed: ${error.message}`);
       const rows = (data ?? []) as AgentRow[];
@@ -228,11 +232,13 @@ export const liveConversation = inngest.createFunction(
       agent_id: agentA.id,
       name: 'Agent A',
       extracted_features: agentA.extracted_features ?? {},
+      interview_answers: agentA.interview_answers ?? undefined,
     };
     const personaB: PersonaProfile = {
       agent_id: agentB.id,
       name: 'Agent B',
       extracted_features: agentB.extracted_features ?? {},
+      interview_answers: agentB.interview_answers ?? undefined,
     };
 
     // Persona prompts are kept on the system side to anchor each side's voice.

@@ -19,6 +19,12 @@ export interface PersonaProfile {
   name?: string;
   extracted_features: ExtractedFeatures;
   agent_id?: string;
+  /** Raw Q→A jsonb from agents.interview_answers. Carried into the
+   *  dialogue prompt so each agent reflects its owner's actual answers,
+   *  not just the (often empty) extracted_features bag. The
+   *  `interview_complete` sentinel and any non-string values are filtered
+   *  out at injection time. */
+  interview_answers?: Record<string, unknown>;
 }
 
 export interface TranscriptTurn {
