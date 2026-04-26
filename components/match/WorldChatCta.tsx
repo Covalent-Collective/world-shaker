@@ -8,6 +8,10 @@ import { useT } from '@/lib/i18n/useT';
 interface WorldChatCtaProps {
   /** Partner's display name (q0_name); used to seed the chat draft. */
   partnerName?: string | null;
+  /** Partner's actual World App username (captured from MiniKit.user at
+   *  page load and persisted on the partner's agent). When present, this
+   *  resolves to a real recipient inside the World Chat composer. */
+  partnerWorldUsername?: string | null;
   /** Universal-link fallback when MiniKit is unavailable (i.e. the user
    *  is browsing this page outside the World App, on a regular browser). */
   fallbackUrl?: string;
@@ -35,6 +39,7 @@ interface WorldChatCtaProps {
  */
 export default function WorldChatCta({
   partnerName,
+  partnerWorldUsername,
   fallbackUrl,
 }: WorldChatCtaProps): React.ReactElement {
   const t = useT();
@@ -43,21 +48,24 @@ export default function WorldChatCta({
   const handleClick = async (): Promise<void> => {
     if (busy) return;
     setBusy(true);
-    const trimmed = partnerName?.trim() ?? '';
-    const message = trimmed
-      ? `Hey ${trimmed} — saw our agents click. Up for a real chat?`
+    const displayName = partnerName?.trim() ?? '';
+    const worldUsername = partnerWorldUsername?.trim() ?? '';
+    const message = displayName
+      ? `Hey ${displayName} — saw our agents click. Up for a real chat?`
       : 'Saw our agents click. Up for a real chat?';
 
     try {
       if (MiniKit.isInstalled()) {
-        // Pass the partner's q0_name as a username candidate when present.
-        // If the World App resolves it to a real handle the recipient is
-        // pre-selected in the Select Conversations sheet; if not, the
-        // sheet still opens with the message draft and the user picks
-        // the recipient manually. Real recipient resolution will use
-        // MiniKit.getUserByAddress once wallet-auth captures wallet
-        // addresses on verify.
-        const to = trimmed.length > 0 ? [trimmed] : undefined;
+        // Recipient resolution preference:
+        //   1. Partner's actual World App username (captured at page-load
+        //      via MiniKit.user → /api/user/world-profile). Resolves to a
+        //      real handle in the Select Conversations sheet.
+        //   2. Partner's q0_name display name as a soft fallback. Almost
+        //      never matches a real World App handle, but lets the user
+        //      see who the chat is meant for.
+        //   3. undefined → composer opens unaddressed and the user picks.
+        const candidate = worldUsername.length > 0 ? worldUsername : displayName;
+        const to = candidate.length > 0 ? [candidate] : undefined;
         const result = await MiniKit.commandsAsync.chat({ to, message });
         if (result.finalPayload.status === 'success') {
           // World Chat composer took over; the World App handles the rest.
