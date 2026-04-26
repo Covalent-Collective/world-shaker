@@ -182,7 +182,7 @@ function makeSupabaseMock({
   };
 
   const rpcMock = vi.fn().mockResolvedValue({
-    data: [{ user_id: USER_B_ID, score: matchCandidatesScore }],
+    data: [{ candidate_user: USER_B_ID, score: matchCandidatesScore }],
     error: null,
   });
 

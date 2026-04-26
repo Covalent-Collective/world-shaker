@@ -130,8 +130,8 @@ export const generateReport = inngest.createFunction(
         return 0.5;
       }
 
-      const results = data as Array<{ user_id: string; score: number }> | null;
-      const entry = results?.find((r) => r.user_id === agentB.user_id);
+      const results = data as Array<{ candidate_user: string; score: number }> | null;
+      const entry = results?.find((r) => r.candidate_user === agentB.user_id);
       return entry?.score ?? 0.5;
     });
 

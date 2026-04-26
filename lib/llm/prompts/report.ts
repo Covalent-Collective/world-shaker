@@ -16,8 +16,8 @@ export interface BuildReportPromptArgs {
  * clamped to [0, 1].
  */
 export function buildReportSchema(baseline_score: number): ReturnType<typeof _buildReportSchema> {
-  const lo = Math.max(0, baseline_score - 0.1);
-  const hi = Math.min(1, baseline_score + 0.1);
+  const lo = Math.max(0, Math.round((baseline_score - 0.1) * 100) / 100);
+  const hi = Math.min(1, Math.round((baseline_score + 0.1) * 100) / 100);
   return _buildReportSchema(lo, hi);
 }
 
@@ -59,25 +59,26 @@ export const ReportSchema = _buildReportSchema(0, 1);
 
 export type ReportOutput = z.infer<ReturnType<typeof buildReportSchema>>;
 
+function formatTranscript(transcript: TranscriptTurn[]): string {
+  return transcript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
+}
+
 /**
- * Validates that every highlight_quote is a verbatim substring of the transcript text.
+ * Validates that every highlight_quote is a verbatim substring of the formatted transcript
+ * (i.e. the same "Speaker: text" representation shown to the LLM).
  */
 export function validateReportQuotes(
   report: { highlight_quotes: string[] },
   transcript: TranscriptTurn[],
 ): { ok: boolean; errors: string[] } {
-  const transcriptText = transcript.map((t) => t.text).join(' ');
+  const formattedTranscript = formatTranscript(transcript);
   const errors: string[] = [];
   for (const quote of report.highlight_quotes) {
-    if (!transcriptText.includes(quote)) {
+    if (!formattedTranscript.includes(quote)) {
       errors.push(`Quote not verbatim: "${quote.slice(0, 60)}..."`);
     }
   }
   return { ok: errors.length === 0, errors };
-}
-
-function formatTranscript(transcript: TranscriptTurn[]): string {
-  return transcript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
 }
 
 /**

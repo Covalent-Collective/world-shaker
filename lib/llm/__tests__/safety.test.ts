@@ -446,6 +446,25 @@ describe('circuit breaker (DB-backed state)', () => {
     });
   });
 
+  it('success with failures > 0 (not half-open) calls reset RPC and clears counter', async () => {
+    // Simulate 2 prior failures in the DB (breaker not yet open — threshold is 3).
+    setAppSettingsBreaker({
+      openrouter: { failures: 2, opened_at: new Date(0).toISOString() },
+    });
+
+    // Next call succeeds — breaker is closed but failures > 0.
+    mockFetch.mockResolvedValueOnce(makeModResponse({ harassment: 0.0, hate: 0.0 }));
+    const result = await detectHostileTone('clean text');
+
+    expect(result.flagged).toBe(false);
+    expect(result.reason).toBe('clean');
+
+    // reset_moderation_breaker MUST be called even though we were not half-open.
+    expect(mockRpc).toHaveBeenCalledWith('reset_moderation_breaker', {
+      p_provider: 'openrouter',
+    });
+  });
+
   it('bug-class 4xx errors do NOT increment the breaker (no RPC call, breaker stays closed)', async () => {
     // 5 bug-class calls: none should call the increment RPC.
     for (let i = 0; i < 5; i++) {

@@ -116,14 +116,6 @@ function isBreakOpen(entry: BreakerEntry, now: number): boolean {
   );
 }
 
-function isHalfOpen(entry: BreakerEntry, now: number): boolean {
-  return (
-    entry.failures >= BREAKER_THRESHOLD &&
-    entry.openedAtMs > 0 &&
-    now - entry.openedAtMs >= BREAKER_WINDOW_MS
-  );
-}
-
 async function recordFailure(provider: string): Promise<void> {
   // Always call the RPC; it atomically increments and returns the new state.
   // The cache is invalidated (overwritten) with the authoritative response.
@@ -335,8 +327,10 @@ async function runModeration(text: string): Promise<FetchOutcome> {
     return { kind: 'bug' };
   }
 
-  // Success — if we were half-open, reset DB + cache.
-  if (isHalfOpen(entry, now)) {
+  // Success — reset DB + cache whenever there are accumulated failures,
+  // regardless of whether we were half-open. This prevents intermittent
+  // failures from accumulating indefinitely and tripping the breaker.
+  if (entry.failures > 0) {
     await recordSuccess(PROVIDER);
   }
 
