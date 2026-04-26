@@ -29,6 +29,7 @@ export type MessageKey =
   | 'interview.skeleton.q5'
   | 'interview.skeleton.q6'
   | 'success.title'
+  | 'success.subtitle'
   | 'success.starter_label'
   | 'success.world_chat_cta'
   | 'match.why_click_label'
