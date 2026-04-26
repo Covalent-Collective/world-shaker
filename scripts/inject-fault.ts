@@ -187,9 +187,9 @@ async function main(): Promise<void> {
   console.log('Step 1/3  Validating conversation...');
   const { data: conv, error: lookupErr } = await db
     .from('conversations')
-    .select('id, status, user_id')
+    .select('id, status, agent_a_id, agent_b_id')
     .eq('id', conversationId)
-    .maybeSingle<{ id: string; status: string; user_id: string }>();
+    .maybeSingle<{ id: string; status: string; agent_a_id: string; agent_b_id: string }>();
 
   if (lookupErr) {
     console.error(`ERROR: Failed to fetch conversation: ${lookupErr.message}`);
@@ -209,7 +209,20 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  console.log(`         Found conversation status='live' user_id=${conv.user_id}`);
+  // Resolve a user_id from one of the participating agents (needed for outcome_events FK).
+  const { data: agentRow, error: agentErr } = await db
+    .from('agents')
+    .select('user_id')
+    .eq('id', conv.agent_a_id)
+    .maybeSingle<{ user_id: string }>();
+
+  if (agentErr || !agentRow) {
+    console.error(`ERROR: Could not resolve user_id from agent_a_id=${conv.agent_a_id}`);
+    process.exit(2);
+  }
+
+  const operatorUserId = agentRow.user_id;
+  console.log(`         Found conversation status='live' (operator user_id=${operatorUserId})`);
   console.log();
 
   // Step 2: UPDATE status='failed' WHERE status='live' (atomic guard).
@@ -227,7 +240,7 @@ async function main(): Promise<void> {
 
   // INSERT synthetic outcome_event with the injection reason.
   const { error: insertErr } = await db.from('outcome_events').insert({
-    user_id: conv.user_id,
+    user_id: operatorUserId,
     event_type: 'wont_connect',
     source_screen: 'inject-fault',
     metadata: {

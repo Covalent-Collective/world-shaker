@@ -284,9 +284,9 @@ describe('POST /api/conversation/[id]/restart', () => {
     expect(mockInngestSend).not.toHaveBeenCalled();
     expect(stub.insertFn).toHaveBeenCalledWith({
       user_id: 'u1',
-      conversation_id: 'c1',
       event_type: 'wont_connect',
-      metadata: { reason: 'quota_exceeded' },
+      source_screen: 'restart',
+      metadata: { reason: 'quota_exceeded', conversation_id: 'c1' },
     });
   });
 });

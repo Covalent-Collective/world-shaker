@@ -59,7 +59,13 @@ function buildChain(result: unknown) {
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.single = vi.fn().mockResolvedValue(result);
   chain.update = vi.fn().mockReturnValue(chain);
+  chain.insert = vi.fn().mockResolvedValue({ error: null });
   return chain;
+}
+
+/** Build a simple insert-only chain (for outcome_events). */
+function buildInsertChain(error: null | object = null) {
+  return { insert: vi.fn().mockResolvedValue({ error }) };
 }
 
 const DEFAULT_CLAIMS = {
@@ -109,15 +115,21 @@ describe('POST /api/match/[id]/like', () => {
 
   // ── skip ────────────────────────────────────────────────────────────────
 
-  it('skip → updates status to skipped, returns mutual: false', async () => {
+  it('skip → updates status to skipped, records skipped outcome_event, returns mutual: false', async () => {
     mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
 
-    // Route calls: from('matches').update().eq().eq().select().single()
+    // Route makes 2 from() calls:
+    //   1. from('matches').update().eq().eq().select().single() — own row
+    //   2. from('outcome_events').insert() — skipped event
     const ownUpdateChain = buildChain({
       data: { id: 'match-abc', candidate_user_id: 'user-bob', world_chat_link: null },
       error: null,
     });
-    mockFrom.mockReturnValue(ownUpdateChain);
+    const outcomeEventChain = buildInsertChain();
+
+    mockFrom
+      .mockReturnValueOnce(ownUpdateChain) // call 1: own row update
+      .mockReturnValueOnce(outcomeEventChain); // call 2: outcome_events insert
 
     const req = makeRequest({ decision: 'skipped' }, 'valid-token');
     const res = await POST(req, { params: DEFAULT_PARAMS });
@@ -128,25 +140,39 @@ describe('POST /api/match/[id]/like', () => {
     expect(json.mutual).toBe(false);
     expect(json.match_id).toBe('match-abc');
 
+    // outcome_events insert called with skipped
+    expect(outcomeEventChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'skipped',
+        match_id: 'match-abc',
+        source_screen: 'match',
+      }),
+    );
+
     // Inngest must NOT be called for skips
     expect(mockInngestSend).not.toHaveBeenCalled();
   });
 
   // ── accept, no reciprocal ───────────────────────────────────────────────
 
-  it('accept with no reciprocal → status accepted, mutual: false', async () => {
+  it('accept with no reciprocal → records accepted outcome_event, status accepted, mutual: false', async () => {
     mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
 
-    // Route makes two from('matches') calls:
-    //   1. update().eq().eq().select().single() — own row
-    //   2. select('id').eq().eq().eq().limit().single() — reciprocal check
+    // Route makes 3 from() calls:
+    //   1. from('matches').update().eq().eq().select().single() — own row
+    //   2. from('outcome_events').insert() — accepted event
+    //   3. from('matches').select('id').eq().eq().eq().limit().single() — reciprocal check
     const ownUpdateChain = buildChain({
       data: { id: 'match-abc', candidate_user_id: 'user-bob', world_chat_link: null },
       error: null,
     });
+    const outcomeEventChain = buildInsertChain();
     const reciprocalChain = buildChain({ data: null, error: { code: 'PGRST116' } });
 
-    mockFrom.mockReturnValueOnce(ownUpdateChain).mockReturnValueOnce(reciprocalChain);
+    mockFrom
+      .mockReturnValueOnce(ownUpdateChain) // call 1: own row update
+      .mockReturnValueOnce(outcomeEventChain) // call 2: outcome_events insert (accepted)
+      .mockReturnValueOnce(reciprocalChain); // call 3: reciprocal check
 
     const req = makeRequest({ decision: 'accepted' }, 'valid-token');
     const res = await POST(req, { params: DEFAULT_PARAMS });
@@ -157,19 +183,30 @@ describe('POST /api/match/[id]/like', () => {
     expect(json.mutual).toBe(false);
     expect(json.match_id).toBe('match-abc');
 
+    expect(outcomeEventChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'accepted',
+        match_id: 'match-abc',
+        source_screen: 'match',
+      }),
+    );
+
     expect(mockInngestSend).not.toHaveBeenCalled();
   });
 
   // ── accept with reciprocal → mutual ─────────────────────────────────────
 
-  it('accept with reciprocal → both rows mutual, match.mutual event sent', async () => {
+  it('accept with reciprocal → both rows mutual, outcome_events for both users, match.mutual event sent', async () => {
     mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
 
-    // Route makes four from('matches') calls:
-    //   1. update().eq().eq().select().single()  — own row update + fetch
-    //   2. select('id').eq().eq().eq().limit().single() — reciprocal check
-    //   3. update({ status:'mutual' }).eq('id', matchId)  — upgrade own row
-    //   4. update({ status:'mutual' }).eq('id', reciprocal.id) — upgrade reciprocal
+    // Route makes 7 from() calls:
+    //   1. from('matches').update().eq().eq().select().single() — own row update + fetch
+    //   2. from('outcome_events').insert() — accepted event
+    //   3. from('matches').select('id').eq().eq().eq().limit().single() — reciprocal check
+    //   4. from('matches').update({ status:'mutual' }).eq('id', matchId) — upgrade own row
+    //   5. from('matches').update({ status:'mutual' }).eq('id', reciprocal.id) — upgrade reciprocal
+    //   6. from('outcome_events').insert() — mutual event for user-alice
+    //   7. from('outcome_events').insert() — mutual event for user-bob
     const ownUpdateChain = buildChain({
       data: {
         id: 'match-abc',
@@ -178,13 +215,20 @@ describe('POST /api/match/[id]/like', () => {
       },
       error: null,
     });
+    const acceptedEventChain = buildInsertChain();
     const reciprocalChain = buildChain({ data: { id: 'match-xyz' }, error: null });
     const mutualUpgradeChain = buildChain({ error: null });
+    const mutualEventAlice = buildInsertChain();
+    const mutualEventBob = buildInsertChain();
 
     mockFrom
       .mockReturnValueOnce(ownUpdateChain) // call 1: own row update
-      .mockReturnValueOnce(reciprocalChain) // call 2: reciprocal check
-      .mockReturnValue(mutualUpgradeChain); // calls 3 & 4: mutual upgrades
+      .mockReturnValueOnce(acceptedEventChain) // call 2: outcome_events insert (accepted)
+      .mockReturnValueOnce(reciprocalChain) // call 3: reciprocal check
+      .mockReturnValueOnce(mutualUpgradeChain) // call 4: upgrade own row to mutual
+      .mockReturnValueOnce(mutualUpgradeChain) // call 5: upgrade reciprocal to mutual
+      .mockReturnValueOnce(mutualEventAlice) // call 6: mutual event for alice
+      .mockReturnValueOnce(mutualEventBob); // call 7: mutual event for bob
 
     const req = makeRequest({ decision: 'accepted' }, 'valid-token');
     const res = await POST(req, { params: DEFAULT_PARAMS });
@@ -196,13 +240,38 @@ describe('POST /api/match/[id]/like', () => {
     expect(json.match_id).toBe('match-abc');
     expect(json.world_chat_link).toBe('https://worldcoin.org/chat/xyz');
 
-    // Inngest event must be sent with both match IDs
+    // outcome_events: accepted event for alice
+    expect(acceptedEventChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'accepted',
+        user_id: 'user-alice',
+        match_id: 'match-abc',
+      }),
+    );
+
+    // outcome_events: mutual event for alice (own match_id)
+    expect(mutualEventAlice.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: 'mutual',
+        user_id: 'user-alice',
+        match_id: 'match-abc',
+      }),
+    );
+
+    // outcome_events: mutual event for bob (reciprocal match_id)
+    expect(mutualEventBob.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ event_type: 'mutual', user_id: 'user-bob', match_id: 'match-xyz' }),
+    );
+
+    // Inngest event must be sent with both match IDs and user IDs
     expect(mockInngestSend).toHaveBeenCalledOnce();
     expect(mockInngestSend).toHaveBeenCalledWith({
       name: 'match.mutual',
       data: {
         match_id_a: 'match-abc',
         match_id_b: 'match-xyz',
+        user_a: 'user-alice',
+        user_b: 'user-bob',
       },
     });
   });

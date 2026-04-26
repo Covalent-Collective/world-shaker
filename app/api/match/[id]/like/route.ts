@@ -70,6 +70,17 @@ export async function POST(
     return NextResponse.json({ error: 'match_not_found' }, { status: 404 });
   }
 
+  // ── Record outcome_event for accepted/skipped ─────────────────────────────
+  const { error: decisionEventError } = await supabase.from('outcome_events').insert({
+    user_id: world_user_id,
+    match_id: matchId,
+    event_type: decision, // 'accepted' or 'skipped'
+    source_screen: 'match',
+  });
+  if (decisionEventError) {
+    console.error('[match/like] outcome_events insert failed (decision):', decisionEventError);
+  }
+
   // ── Skip path ─────────────────────────────────────────────────────────────
   if (decision === 'skipped') {
     return NextResponse.json({ status: 'skipped', mutual: false, match_id: matchId });
@@ -95,12 +106,35 @@ export async function POST(
     supabase.from('matches').update({ status: 'mutual' }).eq('id', reciprocal.id),
   ]);
 
+  // ── Record outcome_event for mutual — one row per user ───────────────────
+  const mutualEvents = await Promise.all([
+    supabase.from('outcome_events').insert({
+      user_id: world_user_id,
+      match_id: matchId,
+      event_type: 'mutual',
+      source_screen: 'match',
+    }),
+    supabase.from('outcome_events').insert({
+      user_id: updatedMatch.candidate_user_id,
+      match_id: reciprocal.id,
+      event_type: 'mutual',
+      source_screen: 'match',
+    }),
+  ]);
+  for (const { error } of mutualEvents) {
+    if (error) {
+      console.error('[match/like] outcome_events insert failed (mutual):', error);
+    }
+  }
+
   // Emit event for downstream jobs (chat creation, push notification, etc.)
   await inngest.send({
     name: 'match.mutual',
     data: {
       match_id_a: matchId,
       match_id_b: reciprocal.id,
+      user_a: world_user_id,
+      user_b: updatedMatch.candidate_user_id,
     },
   });
 

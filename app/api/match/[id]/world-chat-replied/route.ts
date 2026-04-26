@@ -41,6 +41,19 @@ export async function POST(
 
   const supabase = getServiceClient();
 
+  // ── Ownership check ───────────────────────────────────────────────────────
+  const { data: ownedMatch } = await supabase
+    .from('matches')
+    .select('id')
+    .eq('id', matchId)
+    .eq('user_id', world_user_id)
+    .limit(1)
+    .single();
+
+  if (!ownedMatch) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+  }
+
   // ── Record outcome event ──────────────────────────────────────────────────
   const { error: insertError } = await supabase.from('outcome_events').insert({
     event_type: 'replied_24h',

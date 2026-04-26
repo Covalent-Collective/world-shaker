@@ -80,9 +80,9 @@ export async function POST(
     // Record wont_connect outcome so the client can surface feedback.
     await supabase.from('outcome_events').insert({
       user_id: worldUserId,
-      conversation_id: id,
       event_type: 'wont_connect',
-      metadata: { reason: 'quota_exceeded' },
+      source_screen: 'restart',
+      metadata: { reason: 'quota_exceeded', conversation_id: id },
     });
     const { nextResetAt } = await getDailyQuota(worldUserId);
     return NextResponse.json(

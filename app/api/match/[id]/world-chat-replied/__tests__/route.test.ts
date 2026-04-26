@@ -12,7 +12,17 @@ vi.mock('next/headers', () => ({
 
 // Supabase service client mock
 const mockInsert = vi.fn();
-const mockFrom = vi.fn(() => ({ insert: mockInsert }));
+const mockSingle = vi.fn();
+const mockLimit = vi.fn(() => ({ single: mockSingle }));
+const mockEq2 = vi.fn(() => ({ limit: mockLimit }));
+const mockEq1 = vi.fn(() => ({ eq: mockEq2 }));
+const mockSelect = vi.fn(() => ({ eq: mockEq1 }));
+
+// mockFrom routes: 'matches' → ownership chain, 'outcome_events' → insert
+const mockFrom = vi.fn((table: string) => {
+  if (table === 'matches') return { select: mockSelect };
+  return { insert: mockInsert };
+});
 const mockGetServiceClient = vi.fn(() => ({ from: mockFrom }));
 
 vi.mock('@/lib/supabase/service', () => ({
@@ -63,6 +73,8 @@ describe('POST /api/match/[id]/world-chat-replied', () => {
     vi.clearAllMocks();
     mockGetServiceClient.mockReturnValue({ from: mockFrom });
     mockInsert.mockResolvedValue({ error: null });
+    // Default: ownership check passes (match found)
+    mockSingle.mockResolvedValue({ data: { id: 'match-abc' }, error: null });
   });
 
   // ── 401 missing auth ──────────────────────────────────────────────────────
@@ -91,6 +103,23 @@ describe('POST /api/match/[id]/world-chat-replied', () => {
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe('unauthorized');
+  });
+
+  // ── 403 ownership check ───────────────────────────────────────────────────
+
+  it('returns 403 when match does not belong to the authenticated user', async () => {
+    mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
+    // Ownership check returns no row
+    mockSingle.mockResolvedValue({ data: null, error: { code: 'PGRST116' } });
+
+    const req = makeRequest('valid-token');
+    const res = await POST(req, { params: DEFAULT_PARAMS });
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe('forbidden');
+    // outcome_events must NOT be inserted
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   // ── 200 success ───────────────────────────────────────────────────────────
