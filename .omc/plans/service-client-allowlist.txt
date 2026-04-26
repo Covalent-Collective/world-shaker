@@ -26,3 +26,5 @@ lib/avatar/generate.ts
 app/api/match/[id]/like/route.ts
 app/api/stroll/spawn/route.ts
 app/(app)/stroll/page.tsx
+app/(app)/conversation/[id]/page.tsx
+app/api/agent/answer/route.ts
