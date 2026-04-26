@@ -21,6 +21,7 @@ export type MessageKey =
   | 'interview.placeholder'
   | 'interview.next'
   | 'interview.complete'
+  | 'interview.skeleton.q0_name'
   | 'interview.skeleton.q1'
   | 'interview.skeleton.q2'
   | 'interview.skeleton.q3'

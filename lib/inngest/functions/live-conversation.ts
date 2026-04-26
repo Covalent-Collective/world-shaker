@@ -228,15 +228,28 @@ export const liveConversation = inngest.createFunction(
       return { agentA: a, agentB: b };
     });
 
+    // Persona names: use the user-chosen interview_answers.q0_name when
+    // present (set by the new q0_name interview question), falling back to
+    // the legacy 'Agent A' / 'Agent B' labels for older agents that pre-date
+    // the q0_name question.
+    const pickName = (
+      answers: Record<string, unknown> | null,
+      fallback: 'Agent A' | 'Agent B',
+    ): string => {
+      const raw = answers?.q0_name;
+      if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim();
+      return fallback;
+    };
+
     const personaA: PersonaProfile = {
       agent_id: agentA.id,
-      name: 'Agent A',
+      name: pickName(agentA.interview_answers, 'Agent A'),
       extracted_features: agentA.extracted_features ?? {},
       interview_answers: agentA.interview_answers ?? undefined,
     };
     const personaB: PersonaProfile = {
       agent_id: agentB.id,
-      name: 'Agent B',
+      name: pickName(agentB.interview_answers, 'Agent B'),
       extracted_features: agentB.extracted_features ?? {},
       interview_answers: agentB.interview_answers ?? undefined,
     };
