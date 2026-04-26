@@ -43,7 +43,6 @@ export type MessageKey =
   | 'stroll.empty'
   | 'stroll.tap_to_start'
   | 'safety.report'
-  | 'safety.block'
   | 'safety.cancel'
   | 'safety.report_reason.harassment'
   | 'safety.report_reason.hateful'
