@@ -83,8 +83,7 @@ function recordFetch(): {
 
 function renderMenu(overrides?: Partial<Parameters<typeof SafetyMenu>[0]>) {
   const props = {
-    reportedUserId: 'user-abc',
-    surface: 'match' as const,
+    surfaceContext: { match_id: 'match-abc' },
     open: true,
     onOpenChange: vi.fn(),
     ...overrides,
@@ -109,7 +108,6 @@ describe('SafetyMenu', () => {
 
   it('renders Report and Block buttons when open', () => {
     renderMenu();
-    // The menu shows Report (button) and Block (button) — both keyed via i18n
     const reportEls = screen.getAllByText('safety.report');
     expect(reportEls.length).toBeGreaterThan(0);
     expect(screen.getByText('safety.block')).toBeInTheDocument();
@@ -124,35 +122,29 @@ describe('SafetyMenu', () => {
     const user = userEvent.setup();
     renderMenu();
 
-    // The first "safety.report" button (not the title) opens the form
     const reportButtons = screen.getAllByText('safety.report');
-    // Click the button element (not the title h2)
     const reportBtn = reportButtons.find((el) => el.tagName === 'BUTTON');
     expect(reportBtn).toBeDefined();
     await user.click(reportBtn!);
 
-    // After clicking, report-form view is shown — reason radio inputs appear
     await waitFor(() => {
       expect(screen.getByDisplayValue('harassment')).toBeInTheDocument();
     });
   });
 
-  it('submitting a report POSTs to /api/report with correct body', async () => {
+  it('submitting a report POSTs match_id from surfaceContext (not reported_user_id)', async () => {
     const user = userEvent.setup();
-    renderMenu({ reportedUserId: 'target-user-123' });
+    renderMenu({ surfaceContext: { match_id: 'match-xyz-123' } });
 
-    // Open report form
     const reportButtons = screen.getAllByText('safety.report');
     const reportBtn = reportButtons.find((el) => el.tagName === 'BUTTON');
     await user.click(reportBtn!);
 
-    // Select a reason
     await waitFor(() => {
       expect(screen.getByDisplayValue('harassment')).toBeInTheDocument();
     });
     await user.click(screen.getByDisplayValue('harassment'));
 
-    // Submit
     const submitBtn = screen.getByText('safety.report', { selector: 'button' });
     await user.click(submitBtn);
 
@@ -162,14 +154,43 @@ describe('SafetyMenu', () => {
 
     expect(fetchSpy.calls[0]?.url).toBe('/api/report');
     expect(fetchSpy.calls[0]?.body).toMatchObject({
-      reported_user_id: 'target-user-123',
+      match_id: 'match-xyz-123',
       reason: 'harassment',
     });
+    // Must NOT send reported_user_id from the client
+    expect(fetchSpy.calls[0]?.body).not.toHaveProperty('reported_user_id');
   });
 
-  it('Block button POSTs to /api/report with reason=spam', async () => {
+  it('submitting a report POSTs conversation_id from surfaceContext', async () => {
     const user = userEvent.setup();
-    renderMenu({ reportedUserId: 'block-target' });
+    renderMenu({ surfaceContext: { conversation_id: 'conv-abc-456' } });
+
+    const reportButtons = screen.getAllByText('safety.report');
+    const reportBtn = reportButtons.find((el) => el.tagName === 'BUTTON');
+    await user.click(reportBtn!);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('harassment')).toBeInTheDocument();
+    });
+    await user.click(screen.getByDisplayValue('harassment'));
+
+    const submitBtn = screen.getByText('safety.report', { selector: 'button' });
+    await user.click(submitBtn);
+
+    await waitFor(() => {
+      expect(fetchSpy.calls.length).toBe(1);
+    });
+
+    expect(fetchSpy.calls[0]?.body).toMatchObject({
+      conversation_id: 'conv-abc-456',
+      reason: 'harassment',
+    });
+    expect(fetchSpy.calls[0]?.body).not.toHaveProperty('reported_user_id');
+  });
+
+  it('Block button POSTs match_id and reason=spam (no reported_user_id)', async () => {
+    const user = userEvent.setup();
+    renderMenu({ surfaceContext: { match_id: 'block-match-id' } });
 
     await user.click(screen.getByText('safety.block'));
 
@@ -179,8 +200,9 @@ describe('SafetyMenu', () => {
 
     expect(fetchSpy.calls[0]?.url).toBe('/api/report');
     expect(fetchSpy.calls[0]?.body).toMatchObject({
-      reported_user_id: 'block-target',
+      match_id: 'block-match-id',
       reason: 'spam',
     });
+    expect(fetchSpy.calls[0]?.body).not.toHaveProperty('reported_user_id');
   });
 });

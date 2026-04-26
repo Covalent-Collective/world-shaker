@@ -7,16 +7,23 @@ import { getServiceClient } from '@/lib/supabase/service';
 
 export const runtime = 'nodejs';
 
-const Body = z.object({
-  reported_user_id: z.string().uuid(),
-  reason: z.enum(['harassment', 'hateful', 'catfish', 'underage', 'nsfw', 'spam', 'other']),
-  detail: z.string().max(500).optional(),
-});
+const Body = z
+  .object({
+    match_id: z.string().uuid().optional(),
+    conversation_id: z.string().uuid().optional(),
+    reason: z.enum(['harassment', 'hateful', 'catfish', 'underage', 'nsfw', 'spam', 'other']),
+    detail: z.string().max(500).optional(),
+  })
+  .refine((d) => d.match_id || d.conversation_id, {
+    message: 'must provide match_id or conversation_id',
+  });
 
 /**
  * POST /api/report
  *
  * Submits a user report. Auth via ws_session JWT cookie.
+ * reported_user_id is derived server-side from match_id or conversation_id —
+ * never accepted from the request body — to prevent authorization bypass.
  * Duplicate reports (same reporter + reported pair) return 409.
  */
 export async function POST(req: Request) {
@@ -54,9 +61,66 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
 
-  const { reported_user_id, reason, detail } = parsed.data;
-
+  const { match_id, conversation_id, reason, detail } = parsed.data;
   const supabase = getServiceClient();
+
+  // Derive reported_user_id server-side — verifies reporter is a participant.
+  let reported_user_id: string;
+
+  if (match_id) {
+    // Reporter must own this match row; candidate_user_id is the reported party.
+    const { data, error } = await supabase
+      .from('matches')
+      .select('candidate_user_id')
+      .eq('id', match_id)
+      .eq('user_id', claims.world_user_id)
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+    reported_user_id = data.candidate_user_id as string;
+  } else {
+    // conversation_id path: reporter must be one of the agents in the conversation.
+    // agents.user_id links agent → user. The other agent's user is the reported party.
+    const { data, error } = await supabase
+      .from('conversations')
+      .select(
+        `
+        agent_a:agents!conversations_agent_a_id_fkey(user_id),
+        agent_b:agents!conversations_agent_b_id_fkey(user_id)
+      `,
+      )
+      .eq('id', conversation_id!)
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+
+    const agentA = data.agent_a as unknown as { user_id: string } | null;
+    const agentB = data.agent_b as unknown as { user_id: string } | null;
+    const userIdA = agentA?.user_id ?? null;
+    const userIdB = agentB?.user_id ?? null;
+
+    if (userIdA === claims.world_user_id) {
+      reported_user_id = userIdB!;
+    } else if (userIdB === claims.world_user_id) {
+      reported_user_id = userIdA!;
+    } else {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+
+    if (!reported_user_id) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+  }
+
+  // Cannot self-report.
+  if (reported_user_id === claims.world_user_id) {
+    return NextResponse.json({ error: 'cannot_self_report' }, { status: 400 });
+  }
+
   const { error } = await supabase.from('reports').insert({
     reporter_id: claims.world_user_id,
     reported_user_id,

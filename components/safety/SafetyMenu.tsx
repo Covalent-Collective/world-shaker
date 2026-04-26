@@ -36,16 +36,20 @@ const REASON_KEY: Record<ReportReason, MessageKey> = {
   other: 'safety.report_reason.other',
 };
 
+interface SurfaceContext {
+  match_id?: string;
+  conversation_id?: string;
+}
+
 interface Props {
-  reportedUserId: string;
-  surface: 'match' | 'conversation' | 'chat';
+  surfaceContext: SurfaceContext;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 type View = 'menu' | 'report-form';
 
-export function SafetyMenu({ reportedUserId, open, onOpenChange }: Props) {
+export function SafetyMenu({ surfaceContext, open, onOpenChange }: Props) {
   const t = useT();
   const [view, setView] = useState<View>('menu');
   const [selectedReason, setSelectedReason] = useState<ReportReason | null>(null);
@@ -69,7 +73,7 @@ export function SafetyMenu({ reportedUserId, open, onOpenChange }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reported_user_id: reportedUserId,
+          ...surfaceContext,
           reason,
           ...(detailText ? { detail: detailText } : {}),
         }),
