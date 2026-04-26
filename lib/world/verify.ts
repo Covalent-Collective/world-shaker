@@ -3,7 +3,6 @@ import 'server-only';
 import {
   WORLD_ACTION,
   WORLD_ENVIRONMENT,
-  WORLD_APP_ID,
   WORLD_RP_ID,
   REQUIRED_VERIFICATION_LEVEL,
 } from './constants';
@@ -42,23 +41,31 @@ export async function generateRpContext({ signal }: { signal?: string }) {
 }
 
 /**
- * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal v2.
+ * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal v4.
  *
- * Inside the World App, MiniKit produces a flat ISuccessResult; we forward it
- * along with our server-pinned action so the proof's action binding is checked
- * by Dev Portal, then reassert action and verification_level on the response so
- * a proof from a different action / device level can never be accepted.
+ * Inside the World App, MiniKit produces a flat v3 ISuccessResult. We wrap it
+ * into the v4 endpoint's `responses[]` envelope (the v4 endpoint accepts
+ * `protocol_version: "3.0"` bodies for legacy proofs). The action and
+ * verification level are reasserted on the response so a proof from a
+ * different action / device level cannot be accepted.
+ *
+ * The new Dev Portal (developer.world.org) registers actions only against
+ * the v4 registry, so the legacy v2 endpoint (developer.worldcoin.org/v2)
+ * returns "Action not found" for newly-created apps. v4 + RP_ID is the
+ * correct path.
  */
 
 const VERIFY_TIMEOUT_MS = 8000;
+
+const ORB_IDENTIFIERS = new Set(['orb', 'proof_of_human']);
 
 export async function verifyWithDevPortal(
   payload: unknown,
 ): Promise<
   { ok: true; nullifier: string; verification_level: 'orb' } | { ok: false; error: string }
 > {
-  if (!WORLD_APP_ID) {
-    return { ok: false, error: 'app_id_missing' };
+  if (!WORLD_RP_ID) {
+    return { ok: false, error: 'rp_id_missing' };
   }
   if (!payload || typeof payload !== 'object') {
     return { ok: false, error: 'invalid_payload' };
@@ -73,20 +80,29 @@ export async function verifyWithDevPortal(
     return { ok: false, error: 'invalid_idkit_payload' };
   }
 
-  const url = `https://developer.worldcoin.org/api/v2/verify/${WORLD_APP_ID}`;
+  const url = `https://developer.world.org/api/v4/verify/${WORLD_RP_ID}`;
   const body = {
-    merkle_root: p.merkle_root,
-    nullifier_hash: p.nullifier_hash,
-    proof: p.proof,
-    verification_level: p.verification_level ?? REQUIRED_VERIFICATION_LEVEL,
+    protocol_version: '3.0',
+    nonce: crypto.randomUUID(),
     action: WORLD_ACTION,
+    environment: WORLD_ENVIRONMENT,
+    responses: [
+      {
+        identifier: p.verification_level === 'orb' ? 'orb' : 'device',
+        proof: p.proof,
+        merkle_root: p.merkle_root,
+        nullifier: p.nullifier_hash,
+      },
+    ],
   };
   console.log(
     '[verify] forward to dev portal',
     JSON.stringify({
       url,
       action: body.action,
-      verification_level: body.verification_level,
+      environment: body.environment,
+      protocol_version: body.protocol_version,
+      identifier: body.responses[0]?.identifier,
     }),
   );
 
@@ -102,41 +118,51 @@ export async function verifyWithDevPortal(
       console.error('[verify] dev portal non-2xx', res.status, text);
       return { ok: false, error: `dev_portal_${res.status}_${text.slice(0, 500)}` };
     }
-    // v2 success response is flat: { success, action, nullifier_hash,
-    // verification_level, created_at }.
+    // v4 success response: { success, action, environment, nullifier,
+    // results: [{ identifier, success, nullifier }] }.
     const data = (await res.json()) as {
       success?: boolean;
       action?: string;
-      nullifier_hash?: string;
-      verification_level?: string;
+      environment?: string;
+      nullifier?: string;
+      results?: Array<{ identifier?: string; success?: boolean; nullifier?: string }>;
     };
 
-    // Log only non-sensitive shape signals — never the nullifier_hash itself.
+    // Log only non-sensitive shape signals — never the nullifier itself.
     console.log(
       '[verify] dev portal success',
       JSON.stringify({
         success: data.success,
         action_match: data.action === WORLD_ACTION,
-        verification_level: data.verification_level,
+        environment_match: data.environment === WORLD_ENVIRONMENT,
+        result_identifiers: data.results?.map((r) => r.identifier),
+        result_success: data.results?.map((r) => r.success),
       }),
     );
 
-    if (!data.success || typeof data.nullifier_hash !== 'string') {
+    if (!data.success || typeof data.nullifier !== 'string') {
       return { ok: false, error: 'dev_portal_rejected' };
     }
     if (data.action !== WORLD_ACTION) {
       return { ok: false, error: `action_mismatch_${data.action ?? 'missing'}` };
     }
-    if (data.verification_level !== REQUIRED_VERIFICATION_LEVEL) {
+    if (data.environment !== WORLD_ENVIRONMENT) {
+      return { ok: false, error: `environment_mismatch_${data.environment ?? 'missing'}` };
+    }
+    const orbOk = data.results?.some(
+      (r) =>
+        r.success === true && typeof r.identifier === 'string' && ORB_IDENTIFIERS.has(r.identifier),
+    );
+    if (!orbOk) {
       return {
         ok: false,
-        error: `orb_credential_required_${data.verification_level ?? 'missing'}`,
+        error: `orb_credential_required_${data.results?.[0]?.identifier ?? 'missing'}`,
       };
     }
 
     return {
       ok: true,
-      nullifier: data.nullifier_hash,
+      nullifier: data.nullifier,
       verification_level: REQUIRED_VERIFICATION_LEVEL,
     };
   } catch (err) {
