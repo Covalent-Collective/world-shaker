@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import type { ConversationStatus } from '@/types/db';
 
 import FailureOverlay from './FailureOverlay';
+import { SafetyMenu } from '@/components/safety/SafetyMenu';
 
 interface Turn {
   turn_index: number;
@@ -45,6 +46,7 @@ export default function LiveTranscript({
   const [status, setStatus] = useState<ConversationStatus>(initialStatus);
   const lastEventIdRef = useRef<number>(initialLastEventId);
   const sourceRef = useRef<EventSource | null>(null);
+  const [safetyOpen, setSafetyOpen] = useState(false);
 
   useEffect(() => {
     if (status !== 'live') return;
@@ -101,6 +103,36 @@ export default function LiveTranscript({
 
   return (
     <section aria-label="conversation transcript" className="space-y-3">
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          aria-label={t('safety.report')}
+          onClick={() => setSafetyOpen(true)}
+          className="rounded-full p-1.5 text-text-3 transition-opacity hover:opacity-70 active:opacity-50"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+        </button>
+      </div>
+      <SafetyMenu
+        surfaceContext={{ conversation_id: conversationId }}
+        open={safetyOpen}
+        onOpenChange={setSafetyOpen}
+      />
       {turns.length === 0 && status === 'live' ? (
         <p className="text-text-2 text-sm">{t('conversation.preparing')}</p>
       ) : null}

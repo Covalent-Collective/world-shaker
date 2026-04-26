@@ -41,4 +41,15 @@ export type MessageKey =
   | 'stroll.tomorrow_at'
   | 'stroll.streaming_paused'
   | 'stroll.empty'
-  | 'stroll.tap_to_start';
+  | 'stroll.tap_to_start'
+  | 'safety.report'
+  | 'safety.cancel'
+  | 'safety.report_reason.harassment'
+  | 'safety.report_reason.hateful'
+  | 'safety.report_reason.catfish'
+  | 'safety.report_reason.underage'
+  | 'safety.report_reason.nsfw'
+  | 'safety.report_reason.spam'
+  | 'safety.report_reason.other'
+  | 'safety.detail_placeholder'
+  | 'safety.hide_and_report';

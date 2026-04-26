@@ -31,11 +31,12 @@ vi.mock('@/lib/quota/daily', () => ({ getDailyQuota }));
 // ---------------------------------------------------------------------------
 
 const dbState = {
-  candidates: [] as Array<{ candidate_user: string; score: number }>,
+  candidates: [] as Array<{ candidate_user: string; score: number; is_seed?: boolean }>,
   candidateAgent: null as { id: string; user_id: string } | null,
   agent: null as { avatar_url: string | null; extracted_features: Record<string, unknown> } | null,
   outcomeInserts: [] as unknown[],
   rpcCalls: [] as Array<{ fn: string; args: unknown }>,
+  seedPoolActive: true,
 };
 
 function makeAgentsSelect(_cols: string): unknown {
@@ -80,6 +81,19 @@ vi.mock('@/lib/supabase/service', () => ({
           },
         };
       }
+      if (table === 'app_settings') {
+        return {
+          select: () => ({
+            limit: () => ({
+              single: () =>
+                Promise.resolve({
+                  data: { seed_pool_active: dbState.seedPoolActive },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      }
       throw new Error(`unexpected table: ${table}`);
     },
   }),
@@ -122,6 +136,7 @@ describe('firstEncounter Inngest fn', () => {
     dbState.agent = null;
     dbState.outcomeInserts = [];
     dbState.rpcCalls = [];
+    dbState.seedPoolActive = true;
   });
 
   it('happy path: spawns conversation/start with is_first_encounter=true (no pair_key in payload)', async () => {
@@ -129,9 +144,10 @@ describe('firstEncounter Inngest fn', () => {
     const candidate_user = 'user-bbb';
     const candidate_agent_id = 'agent-bbb';
 
-    dbState.candidates = [{ candidate_user, score: 0.91 }];
+    dbState.candidates = [{ candidate_user, score: 0.91, is_seed: false }];
     dbState.candidateAgent = { id: candidate_agent_id, user_id: candidate_user };
     dbState.agent = { avatar_url: null, extracted_features: { tone: 'warm' } };
+    dbState.seedPoolActive = true;
 
     const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id }))) as {
       spawned: boolean;
@@ -149,6 +165,13 @@ describe('firstEncounter Inngest fn', () => {
         ? `${agent_id}|${candidate_agent_id}`
         : `${candidate_agent_id}|${agent_id}`;
     expect(result.pair_key).toBe(expectedPair);
+
+    // RPC called with include_seeds=true (default when seed_pool_active=true).
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: true }),
+    });
 
     // Avatar was generated since avatar_url was null.
     expect(generateAvatar).toHaveBeenCalledWith({
@@ -207,6 +230,51 @@ describe('firstEncounter Inngest fn', () => {
     await expect(handler(makeCtx({ user_id: '', agent_id: '' }))).rejects.toThrow(
       /missing user_id or agent_id/,
     );
+  });
+
+  it('passes include_seeds=false to RPC when seed_pool_active=false', async () => {
+    dbState.seedPoolActive = false;
+    // RPC honours include_seeds at SQL level; mock returns only non-seed rows.
+    dbState.candidates = [{ candidate_user: 'user-real', score: 0.8, is_seed: false }];
+    dbState.candidateAgent = { id: 'agent-real', user_id: 'user-real' };
+    dbState.agent = { avatar_url: '/avatar.png', extracted_features: {} };
+
+    const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id: 'agent-aaa' }))) as {
+      spawned: boolean;
+      candidate_user_id?: string;
+    };
+
+    expect(result.spawned).toBe(true);
+    expect(result.candidate_user_id).toBe('user-real');
+
+    // RPC must have been called with include_seeds=false.
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: false }),
+    });
+  });
+
+  it('returns no_candidate when seed_pool_active=false and RPC returns empty (all seeds filtered SQL-side)', async () => {
+    dbState.seedPoolActive = false;
+    // SQL filter has already excluded seeds; mock returns empty.
+    dbState.candidates = [];
+
+    const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id: 'agent-aaa' }))) as {
+      spawned: boolean;
+      reason?: string;
+    };
+
+    expect(result.spawned).toBe(false);
+    expect(result.reason).toBe('no_candidate');
+    expect(stepSendEvent).not.toHaveBeenCalled();
+
+    // Still called the RPC with include_seeds=false.
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: false }),
+    });
   });
 
   it('inserts wont_connect outcome and returns early when daily quota is exceeded', async () => {

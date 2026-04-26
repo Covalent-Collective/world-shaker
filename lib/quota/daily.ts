@@ -149,3 +149,22 @@ export async function getDailyQuota(world_user_id: string): Promise<DailyQuota> 
     nextResetAt: dayEnd,
   };
 }
+
+export interface QuotaCheckResult {
+  ok: boolean;
+  reason?: 'quota_exceeded';
+  used: number;
+  max: number;
+}
+
+/**
+ * Returns whether the user has quota remaining for today.
+ * Does NOT consume quota — use this as a guard before actions that consume quota.
+ */
+export async function assertQuotaAvailable(world_user_id: string): Promise<QuotaCheckResult> {
+  const quota = await getDailyQuota(world_user_id);
+  if (quota.used >= quota.max) {
+    return { ok: false, reason: 'quota_exceeded', used: quota.used, max: quota.max };
+  }
+  return { ok: true, used: quota.used, max: quota.max };
+}

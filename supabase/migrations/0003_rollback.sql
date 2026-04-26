@@ -17,6 +17,188 @@
 --      matches_user_candidate_active_unique).
 -- ===========================================================================
 
+-- ---------- 0010 rollback: drop 4-arg signature, restore 0009 3-col sig ----
+-- Run this BEFORE the 0009 block if rolling back 0010 independently.
+drop function if exists public.match_candidates(uuid, int, text, boolean);
+
+create or replace function public.match_candidates(
+  target_user uuid,
+  k int,
+  mode text default 'system_generated'
+)
+returns table(candidate_user uuid, score real, is_seed boolean)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  w_cosine numeric;
+  w_struct numeric;
+begin
+  select match_weight_cosine, match_weight_struct
+    into w_cosine, w_struct
+    from public.app_settings
+   where id = 1;
+
+  if w_cosine is null then
+    w_cosine := 0.60;
+    w_struct := 0.40;
+  end if;
+
+  if mode = 'stroll_proactive' then
+    return query
+      select
+        c.user_id as candidate_user,
+        (
+          (w_cosine::real) * (1 - (target_a.embedding <=> c.embedding))
+          + (w_struct::real)
+            * public.structured_feature_score(target_a.extracted_features,
+                                              c.extracted_features)
+        )::real as score,
+        c.is_seed
+      from public.agents c
+      join public.agents target_a on target_a.user_id = target_user
+      where c.user_id <> target_user
+        and c.status = 'active'
+        and c.embedding is not null
+        and target_a.embedding is not null
+        and not exists (
+          select 1 from public.matches m
+          where (
+            (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status in ('accepted','mutual'))
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status in ('accepted','mutual'))
+            or (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status = 'pending')
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status = 'pending' and m.origin <> 'user_initiated_proactive')
+          )
+        )
+      order by score desc
+      limit k;
+  else
+    return query
+      select
+        c.user_id as candidate_user,
+        (
+          (w_cosine::real) * (1 - (target_a.embedding <=> c.embedding))
+          + (w_struct::real)
+            * public.structured_feature_score(target_a.extracted_features,
+                                              c.extracted_features)
+        )::real as score,
+        c.is_seed
+      from public.agents c
+      join public.agents target_a on target_a.user_id = target_user
+      where c.user_id <> target_user
+        and c.status = 'active'
+        and c.embedding is not null
+        and target_a.embedding is not null
+        and not exists (
+          select 1
+            from public.matches m
+           where (
+                  (m.user_id = target_user and m.candidate_user_id = c.user_id)
+               or (m.user_id = c.user_id and m.candidate_user_id = target_user)
+             )
+             and m.status in ('pending', 'accepted', 'mutual')
+        )
+      order by score desc
+      limit k;
+  end if;
+end;
+$$;
+
+revoke execute on function public.match_candidates(uuid, int, text) from public, anon, authenticated;
+grant execute on function public.match_candidates(uuid, int, text) to service_role;
+
+-- ---------- 0009 rollback: restore 2-column match_candidates signature -----
+-- Run this BEFORE the 0006 block if rolling back 0009 independently.
+drop function if exists public.match_candidates(uuid, int, text);
+
+create or replace function public.match_candidates(
+  target_user uuid,
+  k int,
+  mode text default 'system_generated'
+)
+returns table(candidate_user uuid, score real)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  w_cosine numeric;
+  w_struct numeric;
+begin
+  select match_weight_cosine, match_weight_struct
+    into w_cosine, w_struct
+    from public.app_settings
+   where id = 1;
+
+  if w_cosine is null then
+    w_cosine := 0.60;
+    w_struct := 0.40;
+  end if;
+
+  if mode = 'stroll_proactive' then
+    return query
+      select
+        c.user_id as candidate_user,
+        (
+          (w_cosine::real) * (1 - (target_a.embedding <=> c.embedding))
+          + (w_struct::real)
+            * public.structured_feature_score(target_a.extracted_features,
+                                              c.extracted_features)
+        )::real as score
+      from public.agents c
+      join public.agents target_a on target_a.user_id = target_user
+      where c.user_id <> target_user
+        and c.status = 'active'
+        and c.embedding is not null
+        and target_a.embedding is not null
+        and not exists (
+          select 1 from public.matches m
+          where (
+            (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status in ('accepted','mutual'))
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status in ('accepted','mutual'))
+            or (m.user_id = target_user and m.candidate_user_id = c.user_id and m.status = 'pending')
+            or (m.user_id = c.user_id and m.candidate_user_id = target_user and m.status = 'pending' and m.origin <> 'user_initiated_proactive')
+          )
+        )
+      order by score desc
+      limit k;
+  else
+    return query
+      select
+        c.user_id as candidate_user,
+        (
+          (w_cosine::real) * (1 - (target_a.embedding <=> c.embedding))
+          + (w_struct::real)
+            * public.structured_feature_score(target_a.extracted_features,
+                                              c.extracted_features)
+        )::real as score
+      from public.agents c
+      join public.agents target_a on target_a.user_id = target_user
+      where c.user_id <> target_user
+        and c.status = 'active'
+        and c.embedding is not null
+        and target_a.embedding is not null
+        and not exists (
+          select 1
+            from public.matches m
+           where (
+                  (m.user_id = target_user and m.candidate_user_id = c.user_id)
+               or (m.user_id = c.user_id and m.candidate_user_id = target_user)
+             )
+             and m.status in ('pending', 'accepted', 'mutual')
+        )
+      order by score desc
+      limit k;
+  end if;
+end;
+$$;
+
+revoke all on function public.match_candidates(uuid, int, text) from public;
+grant execute on function public.match_candidates(uuid, int, text) to service_role;
+
 -- ---------- 0006: drop functions ---------------------------------------
 drop function if exists public.reset_moderation_breaker(text);
 drop function if exists public.increment_moderation_breaker_failures(text);
@@ -32,6 +214,10 @@ drop function if exists public.structured_feature_score(jsonb, jsonb);
 -- ---------- 0005: drop app_settings + ledger + rate_limit_buckets ------
 drop table if exists public.rate_limit_buckets;
 drop table if exists public.llm_budget_ledger;
+-- 0007: drop seed_pool_active column before dropping the table
+alter table public.app_settings drop column if exists seed_pool_active;
+-- 0008: drop user_badges column before dropping the table
+alter table public.app_settings drop column if exists user_badges;
 drop table if exists public.app_settings;
 
 -- ---------- 0004: revert RLS additions ---------------------------------
@@ -142,3 +328,8 @@ alter table public.agents
   drop column if exists language_pref,
   drop column if exists avatar_generated_at,
   drop column if exists avatar_url;
+
+-- ---------- 0007: drop seed pool flag + seed data ---------------------
+-- Cascades to agents rows via users.id FK (on delete cascade).
+-- seed_pool_active column dropped above before DROP TABLE app_settings.
+delete from public.users where nullifier like 'seed_user_%';

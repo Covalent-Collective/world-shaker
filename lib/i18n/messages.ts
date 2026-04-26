@@ -42,6 +42,17 @@ const ko = {
   'stroll.streaming_paused': '오늘은 산책이 모두 마감되었어요',
   'stroll.empty': '지금은 만날 사람이 없어요',
   'stroll.tap_to_start': '탭해서 만나기',
+  'safety.report': '신고하기',
+  'safety.cancel': '취소',
+  'safety.report_reason.harassment': '괴롭힘',
+  'safety.report_reason.hateful': '혐오 발언',
+  'safety.report_reason.catfish': '사칭',
+  'safety.report_reason.underage': '미성년자',
+  'safety.report_reason.nsfw': '성적 콘텐츠',
+  'safety.report_reason.spam': '스팸',
+  'safety.report_reason.other': '기타',
+  'safety.detail_placeholder': '추가로 알려주실 내용 (선택)',
+  'safety.hide_and_report': '숨기고 신고하기',
 } as const satisfies Record<MessageKey, string>;
 
 const en = {
@@ -86,6 +97,17 @@ const en = {
   'stroll.streaming_paused': "Today's stroll is fully closed",
   'stroll.empty': 'No one to meet right now',
   'stroll.tap_to_start': 'Tap to start',
+  'safety.report': 'Report',
+  'safety.cancel': 'Cancel',
+  'safety.report_reason.harassment': 'Harassment',
+  'safety.report_reason.hateful': 'Hate speech',
+  'safety.report_reason.catfish': 'Catfishing',
+  'safety.report_reason.underage': 'Underage',
+  'safety.report_reason.nsfw': 'NSFW',
+  'safety.report_reason.spam': 'Spam',
+  'safety.report_reason.other': 'Other',
+  'safety.detail_placeholder': 'Anything else? (optional)',
+  'safety.hide_and_report': 'Hide and report',
 } as const satisfies Record<MessageKey, string>;
 
 export const messages = { ko, en } as const satisfies Record<Lang, Record<MessageKey, string>>;

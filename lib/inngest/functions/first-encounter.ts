@@ -64,15 +64,30 @@ export const firstEncounter = inngest.createFunction(
     // ── Step 1: pick best candidate ─────────────────────────────────────
     const candidate = await step.run('pick-candidate', async () => {
       const supabase = getServiceClient();
+
+      // Read seed_pool_active flag; passed to RPC for SQL-level filtering.
+      const { data: settingsRow } = await supabase
+        .from('app_settings')
+        .select('seed_pool_active')
+        .limit(1)
+        .single();
+      const seedPoolActive = settingsRow?.seed_pool_active ?? true;
+
       const { data, error } = await supabase.rpc('match_candidates', {
         target_user: user_id,
         k: 10,
         mode: 'system_generated',
+        include_seeds: seedPoolActive,
       });
       if (error) {
         throw new Error(`match_candidates rpc error: ${error.message}`);
       }
-      const rows = (data ?? []) as Array<{ candidate_user: string; score: number }>;
+      const rows = (data ?? []) as Array<{
+        candidate_user: string;
+        score: number;
+        is_seed?: boolean;
+      }>;
+
       const top = rows[0];
       if (!top) return null;
 

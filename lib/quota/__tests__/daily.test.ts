@@ -33,7 +33,7 @@ vi.mock('@/lib/supabase/service', () => ({
 }));
 
 // Import AFTER mock is registered.
-import { getDailyQuota, DAILY_QUOTA_MAX } from '../daily';
+import { getDailyQuota, DAILY_QUOTA_MAX, assertQuotaAvailable } from '../daily';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -175,5 +175,40 @@ describe('getDailyQuota', () => {
     expect(result.nextResetAt.getUTCMinutes()).toBe(0);
     expect(result.nextResetAt.getUTCSeconds()).toBe(0);
     expect(result.nextResetAt.getUTCMilliseconds()).toBe(0);
+  });
+});
+
+describe('assertQuotaAvailable', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFrom.mockReturnValue({ select: mockSelect });
+    mockGetServiceClient.mockReturnValue({ from: mockFrom } as unknown as MockClient);
+  });
+
+  it('returns ok=true when used=0 (no events today)', async () => {
+    buildSelectChain('Asia/Seoul', 0);
+    const result = await assertQuotaAvailable('user-qa-1');
+    expect(result.ok).toBe(true);
+    expect(result.used).toBe(0);
+    expect(result.max).toBe(4);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('returns ok=true when used=3 (under max=4)', async () => {
+    buildSelectChain('Asia/Seoul', 3);
+    const result = await assertQuotaAvailable('user-qa-2');
+    expect(result.ok).toBe(true);
+    expect(result.used).toBe(3);
+    expect(result.max).toBe(4);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it('returns ok=false with reason=quota_exceeded when used=4 (at max)', async () => {
+    buildSelectChain('Asia/Seoul', 4);
+    const result = await assertQuotaAvailable('user-qa-3');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('quota_exceeded');
+    expect(result.used).toBe(4);
+    expect(result.max).toBe(4);
   });
 });
