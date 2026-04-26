@@ -27,8 +27,8 @@
 --     (real users have action='sign_in' or 'sign_up' from World ID SDK).
 --   * verification_level='orb' satisfies the CHECK constraint from 0001.
 --
--- Companion rollback: 0003_rollback.sql (DELETE FROM users WHERE nullifier
--- LIKE 'seed_user_%' + DROP COLUMN app_settings.seed_pool_active).
+-- Companion rollback: supabase/rollbacks/0003_rollback.sql (DELETE FROM users
+-- WHERE nullifier LIKE 'seed_user_%' + DROP COLUMN app_settings.seed_pool_active).
 -- ===========================================================================
 
 -- ---------- app_settings: seed pool feature flag ------------------------

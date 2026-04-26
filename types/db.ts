@@ -1,6 +1,6 @@
 /**
  * Hand-written DB types (mirror of supabase/migrations/0001_initial.sql +
- * 0003_ux_v1.sql + 0003b_conversation_turns.sql + 0005_app_settings.sql).
+ * 0003_ux_v1.sql + 0004_conversation_turns.sql + 0006_app_settings.sql).
  *
  * Replace with generated types via `npm run db:gen-types` once the Supabase
  * project is provisioned (see Step 5.6 in world-shaker-ux-v1-plan.md).
@@ -83,7 +83,7 @@ export interface Conversation {
   agent_a_id: string;
   agent_b_id: string;
   /**
-   * `turns` JSONB column was dropped in 0003b_conversation_turns.sql.
+   * `turns` JSONB column was dropped in 0004_conversation_turns.sql.
    * Read individual turns from the `conversation_turns` table via the
    * SSE relay route (service-role only).
    */
@@ -153,7 +153,7 @@ export interface Report {
 }
 
 /**
- * Single-row config table (id = 1). Created in 0005_app_settings.sql.
+ * Single-row config table (id = 1). Created in 0006_app_settings.sql.
  * Service-role-only — never queried from the client.
  */
 export interface AppSettings {
@@ -174,7 +174,7 @@ export interface AppSettings {
 
 /**
  * Source-of-truth for cost-cap enforcement (AC-23). Created in
- * 0005_app_settings.sql. Service-role-only.
+ * 0006_app_settings.sql. Service-role-only.
  *
  * NUMERIC columns are serialized as strings by supabase-js to preserve
  * precision; cast to Number at the call site.
@@ -193,7 +193,7 @@ export interface LlmBudgetLedger {
 
 /**
  * Postgres-backed sliding-window rate limiter buckets. Created in
- * 0005_app_settings.sql. Service-role-only.
+ * 0006_app_settings.sql. Service-role-only.
  */
 export interface RateLimitBucket {
   world_user_id: string;

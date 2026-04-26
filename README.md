@@ -11,7 +11,7 @@ World Shaker is a Worldcoin MiniApp dating product built exclusively for verifie
 | Phase 1 — Foundation                               | Schema migrations 0003–0006 (conversation_turns, app_settings, llm_budget_ledger, match_candidates SQL fn), i18n shell (KR+EN), VerifiedHumanBadge, PostHog cohort hashing, daily quota helper, rate-limit middleware, HNSW recall validation, safety eval corpus, match-weight calibration scripts                                                                                               | Done        |
 | Phase 2 — S-grade conversation core                | Persona + agent-dialogue + report + first-message + interview-probe prompts (KR-only), streaming gateway (OpenRouter), live-conversation Inngest fn (atomic turn+ledger write, cost-cap preflight, advisory-lock restart), SSE relay route (Supabase Realtime backed, Last-Event-ID resume), safety pipeline (repeat-loop/NSFW/hostile, shared circuit-breaker), report Inngest fn, abandon route | Done        |
 | Phase 3 — Loops (interview, stroll, match flow)    | Verify + intro routes, interview UX (resumable), avatar generation (one-shot; placeholder fallback if no image model), first-encounter Inngest fn + recovery path, conversation viewer (LiveTranscript + FailureOverlay), match/report viewer, like/skip server action, mutual-match success screen, Daily Stroll card stack                                                                      | Done        |
-| Phase 4 — Notifications + ops                      | World App push (daily-digest morning + mutual-match impact-only; WORLD_APP_PUSH_ENABLED gate), in-app badge fallback, seed-agent pool migration (0007_seed_agents), user-badges migration (0008), match-candidates v2 (0009) + seed-include fix (0010), audit-outcome-events script, smoke-conversation script, inject-fault script, cost-cap Slack alert (SLACK_WEBHOOK_URL)                     | Done        |
+| Phase 4 — Notifications + ops                      | World App push (daily-digest morning + mutual-match impact-only; WORLD_APP_PUSH_ENABLED gate), in-app badge fallback, seed-agent pool migration (0008_seed_agents), user-badges migration (0009), match-candidates v2 (0010) + seed-include fix (0011), audit-outcome-events script, smoke-conversation script, inject-fault script, cost-cap Slack alert (SLACK_WEBHOOK_URL)                     | Done        |
 | Phase 5 — Polish + EN prompt rendering + ship-gate | Avatar policy (one-shot, documented), badge placement audit, copy-tone scaffolding (TODO markers in messages.ts), PostHog AC-19 event coverage + audit script, BILINGUAL_PROMPTS_V1 flag (default false), EN rubric protocol doc, type-generation refresh script, README + .env.example update                                                                                                    | In progress |
 
 > PRs went through dual-LLM review (Claude + Codex critic loop) before merge. v4 plan iteration resolved 1 CRITICAL (Supabase Realtime replaces broken pg LISTEN) + 6 HIGH Codex findings.
@@ -88,19 +88,19 @@ Apply in this exact order. Do **not** skip or reorder — later migrations refer
 0001_initial.sql          — 6 core tables + pgvector HNSW index
 0002_rls.sql              — RLS policies (Codex audit baked in)
 0003_ux_v1.sql            — UX v1 schema additions (avatar, language_pref, matches.origin, conversations state machine)
-0003b_conversation_turns.sql — Normalized turns table + Supabase Realtime publication
-0004_rls_ux_v1.sql        — RLS additions for UX v1 columns
-0005_app_settings.sql     — app_settings singleton, llm_budget_ledger, rate_limit_buckets
-0006_compatibility_score.sql — match_candidates() SQL function (pgvector + structured-feature scoring)
-0007_seed_agents.sql      — Seed agent pool for alpha-stage first-encounter fallback
-0008_user_badges.sql      — user_badges table (Verified Human badge persistence)
-0009_match_candidates_v2.sql — match_candidates() v2 (calibrated weights, mode-aware exclusion)
-0010_match_candidates_include_seeds.sql — Seed-include fix for Daily Stroll proactive mode
+0004_conversation_turns.sql — Normalized turns table + Supabase Realtime publication
+0005_rls_ux_v1.sql        — RLS additions for UX v1 columns
+0006_app_settings.sql     — app_settings singleton, llm_budget_ledger, rate_limit_buckets
+0007_compatibility_score.sql — match_candidates() SQL function (pgvector + structured-feature scoring)
+0008_seed_agents.sql      — Seed agent pool for alpha-stage first-encounter fallback
+0009_user_badges.sql      — user_badges table (Verified Human badge persistence)
+0010_match_candidates_v2.sql — match_candidates() v2 (calibrated weights, mode-aware exclusion)
+0011_match_candidates_include_seeds.sql — Seed-include fix for Daily Stroll proactive mode
 ```
 
-`0003_rollback.sql` is a manual recovery companion for migrations 0003–0006. Do not auto-run it — take a DB snapshot first.
+`supabase/rollbacks/0003_rollback.sql` is a manual recovery companion for migrations 0003–0007. Stored outside `supabase/migrations/` so `supabase db push` does not auto-run it. Take a DB snapshot first.
 
-> **Seed pool migration**: `0007_seed_agents.sql` must be applied to staging before launch gates below can be evaluated. Seed agents are required for the smoke test and first-encounter recovery path.
+> **Seed pool migration**: `0008_seed_agents.sql` must be applied to staging before launch gates below can be evaluated. Seed agents are required for the smoke test and first-encounter recovery path.
 
 ---
 
@@ -134,7 +134,7 @@ Run `npm run eval:en-prompts` against 10 EN-localized agent feature pairs. Same 
 
 ### Seed Pool Migration Applied to Staging
 
-`0007_seed_agents.sql` applied to staging Supabase project. Smoke test passes: `npm run smoke:conversation`.
+`0008_seed_agents.sql` applied to staging Supabase project. Smoke test passes: `npm run smoke:conversation`.
 
 ---
 

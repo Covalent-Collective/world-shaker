@@ -2,7 +2,7 @@
 -- World Shaker — UX v1 schema additions (US-001)
 --
 -- Source: .omc/plans/world-shaker-ux-v1-plan.md (v4) Step 1.1
--- Companion rollback: 0003_rollback.sql (manual recovery only)
+-- Companion rollback: supabase/rollbacks/0003_rollback.sql (manual recovery only)
 --
 -- Additive only. Backfills + state-machine + attempt-aware uniqueness.
 -- v4 residual fixes applied:

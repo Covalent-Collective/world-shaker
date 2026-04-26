@@ -18,6 +18,7 @@ export const runtime = 'nodejs';
  *
  * State machine: only 'live' conversations may be abandoned. The DB
  * BEFORE UPDATE trigger (0003_ux_v1.sql) also guards invalid transitions.
+ * (Migration number unchanged after the 0003b → 0004 renumber on 2026-04-26.)
  * If the UPDATE matches 0 rows the conversation is already terminal → 409.
  */
 export async function POST(

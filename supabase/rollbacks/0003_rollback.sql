@@ -4,7 +4,9 @@
 -- DO NOT auto-run. Manual recovery only. Run with explicit operator approval
 -- after taking a DB snapshot.
 --
--- Reverses migrations 0003 / 0003b / 0004 / 0005 / 0006.
+-- Reverses migrations 0003 / 0004 / 0005 / 0006 / 0007 (renumbered from
+-- 0003 / 0003b / 0004 / 0005 / 0006 on 2026-04-26 to fix `<digits>_name.sql`
+-- pattern requirement of `supabase db push`).
 --
 -- Notes:
 --   * Idempotent via IF EXISTS / IF NOT EXISTS guards.

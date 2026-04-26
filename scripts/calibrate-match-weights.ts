@@ -295,7 +295,7 @@ function gridSearch(train: EvalRow[]): GridCandidate[] {
 
 async function applyWeights(best: GridCandidate): Promise<void> {
   // app_settings is a single-row table with fixed columns (id=1, per
-  // supabase/migrations/0005_app_settings.sql). It does NOT use a key/value
+  // supabase/migrations/0006_app_settings.sql). It does NOT use a key/value
   // row format — update the specific columns directly.
   //
   // Dynamic import avoids pulling server-only into --help/missing-corpus paths.
