@@ -32,10 +32,14 @@ const dbState = {
   existingAnswers: {} as Record<string, string>,
   readError: null as { message: string } | null,
   updateError: null as { message: string } | null,
+  noAgentRow: false,
 };
 
 // Capture the last update call payload for assertion.
 let lastUpdatePayload: Record<string, unknown> | null = null;
+
+// Capture insert calls for the no-agent-row path.
+let lastInsertPayload: Record<string, unknown> | null = null;
 
 vi.mock('@/lib/supabase/service', () => ({
   getServiceClient: () => ({
@@ -48,10 +52,24 @@ vi.mock('@/lib/supabase/service', () => ({
           eq() {
             return selectBuilder;
           },
+          // Legacy single() kept for safety; route now uses maybeSingle().
           single() {
             return Promise.resolve({
-              data: dbState.readError ? null : { interview_answers: dbState.existingAnswers },
+              data: dbState.readError
+                ? null
+                : { id: 'agent-1', interview_answers: dbState.existingAnswers },
               error: dbState.readError,
+            });
+          },
+          maybeSingle() {
+            if (dbState.readError) {
+              return Promise.resolve({ data: null, error: dbState.readError });
+            }
+            return Promise.resolve({
+              data: dbState.noAgentRow
+                ? null
+                : { id: 'agent-1', interview_answers: dbState.existingAnswers },
+              error: null,
             });
           },
         };
@@ -73,6 +91,10 @@ vi.mock('@/lib/supabase/service', () => ({
           update(payload: Record<string, unknown>) {
             lastUpdatePayload = payload;
             return updateBuilder;
+          },
+          insert(payload: Record<string, unknown>) {
+            lastInsertPayload = payload;
+            return Promise.resolve({ error: dbState.updateError });
           },
         };
       }
@@ -152,9 +174,11 @@ describe('POST /api/agent/answer', () => {
   beforeEach(() => {
     cookieJar = {};
     lastUpdatePayload = null;
+    lastInsertPayload = null;
     dbState.existingAnswers = {};
     dbState.readError = null;
     dbState.updateError = null;
+    dbState.noAgentRow = false;
     rateLimitState.ok = true;
     buildInterviewProbePromptMock.mockClear();
     openAICreateMock.mockClear();
@@ -209,6 +233,28 @@ describe('POST /api/agent/answer', () => {
     // No probe generation
     expect(buildInterviewProbePromptMock).not.toHaveBeenCalled();
     expect(openAICreateMock).not.toHaveBeenCalled();
+  });
+
+  it('INSERTs a new agent row when no agent row exists (no-agent-row path)', async () => {
+    await setSessionCookie('user-new');
+    dbState.noAgentRow = true; // maybeSingle() returns null
+
+    const req = makeRequest({
+      skeleton_question_id: 'q1',
+      answer: 'first ever answer',
+      request_probe: false,
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ saved: true });
+
+    // INSERT was called, not UPDATE
+    expect(lastInsertPayload).toMatchObject({
+      interview_answers: { q1: 'first ever answer' },
+      status: 'active',
+    });
+    expect(lastUpdatePayload).toBeNull();
   });
 
   it('saves answer and returns probes when request_probe=true', async () => {

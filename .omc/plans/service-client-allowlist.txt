@@ -31,3 +31,4 @@ app/api/agent/answer/route.ts
 app/api/agent/activate/route.ts
 app/(app)/match/[id]/success/page.tsx
 app/(app)/match/[id]/page.tsx
+app/page.tsx

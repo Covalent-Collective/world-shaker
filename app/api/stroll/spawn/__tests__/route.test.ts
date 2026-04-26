@@ -159,6 +159,8 @@ describe('POST /api/stroll/spawn', () => {
   // ── 200 success ──────────────────────────────────────────────────────────
 
   it('returns 200 and inserts outcome_event on success', async () => {
+    const SYNTHETIC_CONVERSATION_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+
     mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
     mockRateLimit.mockResolvedValue({ ok: true, retryAfterSeconds: 0, remaining: 9 });
     mockGetDailyQuota.mockResolvedValue({ used: 1, max: 4, nextResetAt: new Date() });
@@ -175,11 +177,17 @@ describe('POST /api/stroll/spawn', () => {
     // outcome_events insert
     const insertChain = buildChain({ error: null });
 
-    // match_candidates RPC returns our candidate (keyed by user id)
-    mockRpc.mockResolvedValue({
-      data: [{ candidate_user: CANDIDATE_USER_ID }],
-      error: null,
-    });
+    // match_candidates RPC returns our candidate (keyed by user id).
+    // allocate_conversation_attempt RPC returns a synthetic conversation_id.
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ candidate_user: CANDIDATE_USER_ID }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: SYNTHETIC_CONVERSATION_ID,
+        error: null,
+      });
 
     // from() call order:
     //  1. app_settings (select streaming_paused)
@@ -197,9 +205,10 @@ describe('POST /api/stroll/spawn', () => {
 
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.conversation_id_pending).toBe(true);
+    // Route now returns the pre-allocated conversation_id directly.
+    expect(json.conversation_id).toBe(SYNTHETIC_CONVERSATION_ID);
 
-    // Inngest event was sent with resolved agent ids (not user ids)
+    // Inngest event was sent with the pre-allocated conversation_id and resolved agent ids.
     expect(mockInngestSend).toHaveBeenCalledOnce();
     expect(mockInngestSend).toHaveBeenCalledWith({
       name: 'conversation/start',
@@ -209,14 +218,16 @@ describe('POST /api/stroll/spawn', () => {
         agent_a_id: OWN_AGENT_ID,
         agent_b_id: CANDIDATE_AGENT_ID,
         language: 'ko',
+        conversation_id: SYNTHETIC_CONVERSATION_ID,
       }),
     });
 
-    // outcome_event INSERT was called
+    // outcome_event INSERT was called with correct shape.
     expect(insertChain.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: DEFAULT_CLAIMS.world_user_id,
         event_type: 'viewed',
+        source_screen: 'stroll',
       }),
     );
   });

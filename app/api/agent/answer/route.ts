@@ -151,25 +151,29 @@ export async function POST(req: Request) {
   // ── Persist answer ────────────────────────────────────────────────────────
   const db = getServiceClient();
 
-  // Read current interview_answers to merge the new answer in.
-  const { data: row, error: readError } = await db
+  // Use maybeSingle() so the route works whether or not an agent row exists yet.
+  // /api/verify only creates users, not agents — the first answer call may need
+  // to INSERT rather than UPDATE.
+  const { data: row } = await db
     .from('agents')
-    .select('interview_answers')
+    .select('id, interview_answers')
     .eq('user_id', world_user_id)
-    .single();
-
-  if (readError) {
-    console.error('[agent/answer] read agent row error', readError);
-    return NextResponse.json({ error: 'save_failed' }, { status: 500 });
-  }
+    .maybeSingle();
 
   const current = (row?.interview_answers as Record<string, string>) ?? {};
   const merged = { ...current, [skeleton_question_id]: answer };
 
-  const { error: updErr } = await db
-    .from('agents')
-    .update({ interview_answers: merged })
-    .eq('user_id', world_user_id);
+  let updErr: { message: string } | null;
+  if (row) {
+    ({ error: updErr } = await db
+      .from('agents')
+      .update({ interview_answers: merged })
+      .eq('user_id', world_user_id));
+  } else {
+    ({ error: updErr } = await db
+      .from('agents')
+      .insert({ user_id: world_user_id, interview_answers: merged, status: 'active' }));
+  }
 
   if (updErr) {
     console.error('[agent/answer] persist error', updErr);
