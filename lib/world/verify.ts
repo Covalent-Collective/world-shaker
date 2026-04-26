@@ -8,39 +8,6 @@ import {
 } from './constants';
 
 /**
- * Generate the rp_context that the client passes to IDKit.
- *
- * SECURITY: This must run server-side only. WORLD_SIGNING_KEY must never
- * be exposed to the browser. See app/api/rp-context/route.ts.
- *
- * NOTE: This is a scaffold. Replace with the actual signing implementation
- * once the Worldcoin SDK helper for rp_context generation is wired in.
- */
-export async function generateRpContext({ signal }: { signal?: string }) {
-  const signingKey = process.env.WORLD_SIGNING_KEY;
-  if (!signingKey) {
-    throw new Error('WORLD_SIGNING_KEY missing — server env not configured');
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const nonce = crypto.randomUUID();
-
-  // TODO: replace with proper signed RP context per
-  // https://docs.world.org/api-reference/developer-portal/verify
-  return {
-    rp_id: WORLD_RP_ID,
-    action: WORLD_ACTION,
-    signal,
-    environment: WORLD_ENVIRONMENT,
-    nonce,
-    created_at: now,
-    expires_at: now + 600,
-    // sig: <hmac of the above using signingKey>
-    sig: 'TODO_SCAFFOLD',
-  };
-}
-
-/**
  * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal v4.
  *
  * Inside the World App, MiniKit produces a flat v3 ISuccessResult. We wrap it

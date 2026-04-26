@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
 import { createHash, randomBytes } from 'node:crypto';
 import { getServiceClient } from '@/lib/supabase/service';
-import { WORLD_ACTION } from '@/lib/world/constants';
 
 export const runtime = 'nodejs';
 
@@ -44,80 +42,11 @@ export async function GET(req: Request) {
   return NextResponse.json({ nonce, expires_at: expiresAt });
 }
 
-const Body = z.object({
-  nullifier: z.string(),
-  wallet_address: z.string(),
-  world_username: z.string().optional(),
-  nonce: z.string(),
-  signed_nonce: z.string(),
-});
-
-/**
- * POST /api/wallet-auth
- *
- * After IDKit verify succeeds, the client signs the nonce with their wallet
- * and POSTs here to associate the wallet_address + world_username with the
- * user record.
- *
- * Flow:
- *   1. Look up the nonce in auth_nonces, check it is unexpired and unconsumed.
- *   2. Verify the wallet signature (TODO — see below).
- *   3. Mark the nonce consumed (idempotent).
- *   4. Update the user row scoped by (nullifier, action).
- *
- * world_username comes from MiniKit.user.username (auto-populated, never
- * manual). See v3 spec.
- */
-export async function POST(req: Request) {
-  try {
-    const body = Body.safeParse(await req.json());
-    if (!body.success) {
-      return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
-    }
-
-    const supabase = getServiceClient();
-    const hash = hashNonce(body.data.nonce);
-
-    // Single-statement consume: only succeeds if the nonce row is unconsumed
-    // and unexpired. Returns the row on success, or zero rows otherwise.
-    const { data: consumed, error: consumeError } = await supabase
-      .from('auth_nonces')
-      .update({ consumed_at: new Date().toISOString() })
-      .eq('nonce_hash', hash)
-      .is('consumed_at', null)
-      .gt('expires_at', new Date().toISOString())
-      .select('nonce_hash')
-      .maybeSingle();
-
-    if (consumeError) {
-      console.error('nonce consume error:', consumeError);
-      return NextResponse.json({ error: 'nonce_check_failed' }, { status: 500 });
-    }
-    if (!consumed) {
-      return NextResponse.json({ error: 'nonce_invalid_or_expired' }, { status: 400 });
-    }
-
-    // TODO: verify body.data.signed_nonce against body.data.wallet_address
-    // (SIWE / EIP-191 / EIP-1271). This scaffold trusts the request.
-    // Replace before production launch.
-
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({
-        wallet_address: body.data.wallet_address,
-        world_username: body.data.world_username,
-      })
-      .eq('nullifier', body.data.nullifier)
-      .eq('action', WORLD_ACTION);
-
-    if (updateError) {
-      console.error('wallet-auth update error:', updateError);
-      return NextResponse.json({ error: 'update_failed' }, { status: 500 });
-    }
-
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error('wallet-auth error:', err);
-    return NextResponse.json({ error: 'wallet_auth_failed' }, { status: 500 });
-  }
+// SECURITY STOP-GAP: signature verification is unimplemented. The previous
+// handler trusted the client-supplied wallet_address ↔ nullifier pair, which
+// would let any HTTP client mutate any user's wallet binding. Returning 501
+// until verifySiweMessage (from @worldcoin/minikit-js) and a `siwe_message`
+// body field are wired in. Track via wallet-auth implementation PR.
+export async function POST() {
+  return NextResponse.json({ error: 'not_implemented' }, { status: 501 });
 }
