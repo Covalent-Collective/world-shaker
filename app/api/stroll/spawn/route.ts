@@ -82,10 +82,10 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  // 2. streaming_paused
+  // 2. streaming_paused + seed_pool_active
   const { data: settingsRow } = await supabase
     .from('app_settings')
-    .select('streaming_paused')
+    .select('streaming_paused, seed_pool_active')
     .limit(1)
     .single();
 
@@ -96,6 +96,11 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  // Read seed pool flag; default true (seeds included) if row missing.
+  // v1 follow-up: extend match_candidates RPC to accept include_seeds boolean
+  // for SQL-level filtering instead of this client-side filter.
+  const seedPoolActive = settingsRow?.seed_pool_active ?? true;
+
   // 3. Defense-in-depth: verify candidate is in match_candidates results
   const { data: candidates } = await supabase.rpc('match_candidates', {
     target_user: worldUserId,
@@ -103,7 +108,12 @@ export async function POST(req: Request): Promise<Response> {
     mode: 'stroll_proactive',
   });
 
-  const candidateList = Array.isArray(candidates) ? candidates : [];
+  const rawCandidateList = Array.isArray(candidates) ? candidates : [];
+  // Filter out seed agents when the seed pool flag is disabled.
+  const candidateList = seedPoolActive
+    ? rawCandidateList
+    : rawCandidateList.filter((c: { candidate_user: string; is_seed?: boolean }) => !c.is_seed);
+
   const isValidCandidate = candidateList.some(
     (c: { candidate_user: string }) => c.candidate_user === candidate_user_id,
   );

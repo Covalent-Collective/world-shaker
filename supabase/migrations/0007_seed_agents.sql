@@ -12,9 +12,16 @@
 --   * agents.is_seed=true marks rows for pool-mix logic in first-encounter
 --     and stroll Inngest fns (mix ratio: 100% at <10 users, linear to 0%
 --     at 100+, per plan AC-R4).
---   * embeddings are placeholder zeros — production recomputes via
---     embedText() at first match_candidates() call for each seed. The HNSW
---     partial index covers them once embedding is non-null.
+--   * embeddings are deterministic pseudo-embeddings derived from agent
+--     index N using formula: ((i + N*17) % 256 - 128) / 128.0 for i in
+--     0..1535. Each agent gets a distinct unit-normalised-ish vector that
+--     produces plausible HNSW results pre-launch.
+--
+--     v1 follow-up (post-alpha): call scripts/recompute-seed-embeddings.ts
+--     to replace these with real embedText() vectors generated from
+--     extracted_features. The script runs once at deploy time when the
+--     OpenRouter API key is available.
+--
 --   * nullifier='seed_user_<n>', action='seed' satisfies the
 --     UNIQUE(nullifier, action) constraint without colliding with real users
 --     (real users have action='sign_in' or 'sign_up' from World ID SDK).
@@ -59,7 +66,7 @@ select
     'values',     'depth',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 1 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_1';
 
 -- Persona 2: Analytical + playful — data nerd who loves board games and dad jokes
@@ -90,7 +97,7 @@ select
     'values',     'intellectual curiosity',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 2 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_2';
 
 -- Persona 3: Calm + ambitious — yoga teacher with startup ambitions
@@ -121,7 +128,7 @@ select
     'values',     'growth',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 3 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_3';
 
 -- Persona 4: Extrovert + warm — community organiser, loves cooking for crowds
@@ -152,7 +159,7 @@ select
     'values',     'connection',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 4 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_4';
 
 -- Persona 5: Curious + independent — traveller, linguistics nerd
@@ -183,7 +190,7 @@ select
     'values',     'independence',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 5 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_5';
 
 -- Persona 6: Thoughtful + dry humour — software engineer, minimalist aesthetic
@@ -214,7 +221,7 @@ select
     'values',     'craftsmanship',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 6 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_6';
 
 -- Persona 7: Earnest + outdoorsy — amateur climber, environmentalist
@@ -245,7 +252,7 @@ select
     'values',     'intentionality',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 7 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_7';
 
 -- Persona 8: Sentimental + storyteller — writer, collects old letters
@@ -276,7 +283,7 @@ select
     'values',     'authenticity',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 8 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_8';
 
 -- Persona 9: Pragmatic + nurturing — nurse, volunteers on weekends
@@ -307,7 +314,7 @@ select
     'values',     'care',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 9 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_9';
 
 -- Persona 10: Bold + unconventional — streetwear designer, nightlife explorer
@@ -338,7 +345,7 @@ select
     'values',     'self-expression',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 10 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_10';
 
 -- Persona 11: Quiet + intellectual — philosophy grad student, avid reader
@@ -369,7 +376,7 @@ select
     'values',     'truth',
     'age_band',   '20s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 11 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_11';
 
 -- Persona 12: Cheerful + practical — PE teacher, weekend chef
@@ -400,7 +407,7 @@ select
     'values',     'joy',
     'age_band',   '30s'
   ),
-  array_fill(0.0::real, ARRAY[1536])::vector
+  (select array_agg(((i + 12 * 17) % 256 - 128)::real / 128.0 order by i)::vector from generate_series(0, 1535) as i)
 from public.users where nullifier = 'seed_user_12';
 
 commit;

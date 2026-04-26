@@ -32,6 +32,10 @@ drop function if exists public.structured_feature_score(jsonb, jsonb);
 -- ---------- 0005: drop app_settings + ledger + rate_limit_buckets ------
 drop table if exists public.rate_limit_buckets;
 drop table if exists public.llm_budget_ledger;
+-- 0007: drop seed_pool_active column before dropping the table
+alter table public.app_settings drop column if exists seed_pool_active;
+-- 0008: drop user_badges column before dropping the table
+alter table public.app_settings drop column if exists user_badges;
 drop table if exists public.app_settings;
 
 -- ---------- 0004: revert RLS additions ---------------------------------
@@ -145,7 +149,5 @@ alter table public.agents
 
 -- ---------- 0007: drop seed pool flag + seed data ---------------------
 -- Cascades to agents rows via users.id FK (on delete cascade).
+-- seed_pool_active column dropped above before DROP TABLE app_settings.
 delete from public.users where nullifier like 'seed_user_%';
-
-alter table public.app_settings
-  drop column if exists seed_pool_active;
