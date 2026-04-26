@@ -32,7 +32,21 @@ export const runtime = 'nodejs';
  * rather than `/match/...` so the bypass surface stays explicit.
  */
 const DEMO_COMPAT_SCORE = 0.85;
-const DEMO_WORLD_CHAT_LINK = 'https://world.org/mini-app?app_id=worldchat';
+
+// Canonical World Chat MiniApp universal link. Per docs.world.org/mini-apps/
+// sharing/world-chat-qa, the World Chat mini app's app_id is
+// app_e293fcd0565f45ca296aa317212d8741, addressable via the World universal
+// link router. Tapping this from inside the World App routes the user
+// straight into the World Chat mini app; from a regular browser it falls
+// back to the World Apps directory.
+//
+// Recipient pre-fill (`?recipient=<username>` in the path query) requires
+// resolving the partner's World Chat username from their wallet address
+// via MiniKit.getUserByAddress — we don't yet capture wallet addresses
+// (wallet-auth POST is 501'd) so we hand off to a blank chat compose for
+// now. Recipient pre-fill lands once wallet-auth ships.
+const WORLD_CHAT_APP_ID = 'app_e293fcd0565f45ca296aa317212d8741';
+const DEMO_WORLD_CHAT_LINK = `https://worldcoin.org/mini-app?app_id=${WORLD_CHAT_APP_ID}`;
 
 export async function POST(
   _req: Request,

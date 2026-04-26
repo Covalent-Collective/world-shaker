@@ -28,6 +28,13 @@ interface PokemonStageProps {
    *  invited to message after the encounter ends). Optional; the popup
    *  falls back to a name-less CTA when unknown. */
   partnerName?: string | null;
+  /** Display name of the CURRENT user's own agent (their q0_name). Used
+   *  to render "{name}" on the dialogue plate when this agent is speaking,
+   *  in place of the legacy "AGENT A/B" label. */
+  selfName?: string | null;
+  /** Which side (A or B) the current viewer's own agent occupies in this
+   *  conversation. Determined server-side from agent_a_id ownership. */
+  selfSide?: 'A' | 'B';
 }
 
 const WALK_IN_DURATION_MS = 2400;
@@ -61,6 +68,8 @@ export default function PokemonStage({
   initialStatus,
   initialLastEventId,
   partnerName,
+  selfName,
+  selfSide,
 }: PokemonStageProps): React.ReactElement {
   const t = useT();
   const [latest, setLatest] = useState<Turn | null>(null);
@@ -217,6 +226,12 @@ export default function PokemonStage({
 
   const dialogueText = latest?.text ?? (seated ? t('conversation.preparing') : '');
   const dialogueSpeaker = latest?.speaker ?? null;
+  // Map dialogue side → display name. The viewer's own side is `selfSide`
+  // (defaults to 'A' for back-compat with the older single-name plumbing).
+  const ownerOfA = selfSide === 'B' ? partnerName : selfName;
+  const ownerOfB = selfSide === 'B' ? selfName : partnerName;
+  const dialogueSpeakerName =
+    dialogueSpeaker === 'A' ? ownerOfA : dialogueSpeaker === 'B' ? ownerOfB : null;
 
   return (
     <main className="fixed inset-0 flex flex-col bg-bg overflow-hidden">
@@ -301,6 +316,7 @@ export default function PokemonStage({
         {seated ? (
           <PokemonDialogueBox
             speaker={dialogueSpeaker}
+            speakerName={dialogueSpeakerName ?? null}
             text={dialogueText}
             awaitingNext={awaitingNext}
             onSkip={advance}

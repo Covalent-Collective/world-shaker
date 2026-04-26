@@ -5,6 +5,9 @@ import { cn } from '@/lib/utils';
 
 interface PokemonDialogueBoxProps {
   speaker: 'A' | 'B' | null;
+  /** Display name of the current speaker — usually each agent's q0_name
+   *  (e.g. "bigJY"). When null, falls back to the legacy "AGENT A/B" plate. */
+  speakerName?: string | null;
   text: string;
   /** Drives the typewriter rate. Lower = faster. */
   charIntervalMs?: number;
@@ -27,6 +30,7 @@ interface PokemonDialogueBoxProps {
  */
 export default function PokemonDialogueBox({
   speaker,
+  speakerName,
   text,
   charIntervalMs = 28,
   awaitingNext = false,
@@ -78,7 +82,12 @@ export default function PokemonDialogueBox({
     onSkip?.();
   };
 
-  const speakerLabel = speaker === 'A' ? 'AGENT  A' : speaker === 'B' ? 'AGENT  B' : '— —';
+  // Plate text: speaker's chosen name (q0_name) when available, else fall
+  // back to the legacy AGENT A/B label. Trimmed at 14 chars so longer
+  // handles don't overflow the pixel-styled tab.
+  const cleanName = (speakerName ?? '').trim();
+  const fallbackLabel = speaker === 'A' ? 'AGENT  A' : speaker === 'B' ? 'AGENT  B' : '— —';
+  const speakerLabel = cleanName.length > 0 ? cleanName.slice(0, 14) : fallbackLabel;
   const speakerColor =
     speaker === 'A'
       ? 'bg-[#c0413a] text-[#fffaf0]'
