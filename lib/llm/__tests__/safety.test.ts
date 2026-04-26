@@ -3,10 +3,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mock @/lib/supabase/service
+//
+// safety.ts uses two surfaces on the service client:
+//   1. .rpc('increment_moderation_breaker_failures' | 'reset_moderation_breaker')
+//   2. .from('app_settings').select('moderation_breaker_state').eq('id', 1).maybeSingle()
+// The mock returns whatever appSettingsStub.data currently holds for the
+// app_settings read, and lets each test set explicit RPC responses on mockRpc.
 // ---------------------------------------------------------------------------
 
 const mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
-const mockGetServiceClient = vi.fn(() => ({ rpc: mockRpc }));
+const appSettingsStub: { data: unknown; error: unknown } = { data: null, error: null };
+const mockMaybeSingle = vi.fn(() => Promise.resolve(appSettingsStub));
+
+const mockGetServiceClient = vi.fn(() => ({
+  rpc: mockRpc,
+  from: (_table: string) => ({
+    select: (_cols: string) => ({
+      eq: (_col: string, _val: unknown) => ({
+        maybeSingle: mockMaybeSingle,
+      }),
+    }),
+  }),
+}));
 
 vi.mock('@/lib/supabase/service', () => ({
   getServiceClient: () => mockGetServiceClient(),
@@ -77,8 +95,23 @@ beforeEach(() => {
   mockFetch.mockReset();
   mockRpc.mockReset();
   mockRpc.mockResolvedValue({ data: null, error: null });
+  appSettingsStub.data = null;
+  appSettingsStub.error = null;
+  mockMaybeSingle.mockClear();
   mockCapture.mockReset();
 });
+
+// Helpers to script the DB-backed breaker state.
+function setAppSettingsBreaker(
+  state: Record<string, { failures: number; opened_at: string }>,
+): void {
+  appSettingsStub.data = { moderation_breaker_state: state };
+  appSettingsStub.error = null;
+}
+
+function makeIncrementResponse(failures: number, openedAt = new Date().toISOString()) {
+  return { data: { failures, opened_at: openedAt }, error: null };
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -233,8 +266,9 @@ describe('detectHostileTone', () => {
 
     const resultPromise = detectHostileTone('some text');
 
-    // Advance past the 800ms abort timeout.
-    vi.advanceTimersByTime(900);
+    // Flush microtasks so loadBreakerState() resolves and callModeration()
+    // schedules its 800ms abort timer BEFORE we advance fake time.
+    await vi.advanceTimersByTimeAsync(900);
 
     const result = await resultPromise;
 
@@ -323,12 +357,18 @@ describe('detectNSFW', () => {
 // Circuit breaker
 // ===========================================================================
 
-describe('circuit breaker', () => {
+describe('circuit breaker (DB-backed state)', () => {
   // _resetBreakerForTesting() is called in the global beforeEach above,
-  // so each test starts with a clean breaker.
+  // so each test starts with an empty in-memory cache. The DB stub
+  // (appSettingsStub) starts empty, meaning "breaker closed".
 
-  it('after 3 failures within 60s, 4th call skips network and returns degraded', async () => {
-    // First 3 calls → each returns 5xx (failure).
+  it('after 3 failures within 60s, 4th call skips network and returns degraded (cache hit, no DB read)', async () => {
+    // Each provider failure → RPC returns the new (incremented) state.
+    mockRpc
+      .mockResolvedValueOnce(makeIncrementResponse(1))
+      .mockResolvedValueOnce(makeIncrementResponse(2))
+      .mockResolvedValueOnce(makeIncrementResponse(3));
+
     for (let i = 0; i < 3; i++) {
       mockFetch.mockResolvedValueOnce(makeErrorResponse(503));
       const r = await detectHostileTone('text');
@@ -336,55 +376,78 @@ describe('circuit breaker', () => {
       expect(r.reason).toBe('degraded');
     }
 
-    // 4th call — breaker should be open: fetch must NOT be called.
+    // After the 3rd failure the cache holds { failures: 3, opened_at: ~now }.
+    // The 4th call must NOT call fetch and must NOT re-read app_settings —
+    // the cache (TTL 10s) is authoritative for this hot path.
+    const maybeSingleBefore = mockMaybeSingle.mock.calls.length;
+
     mockFetch.mockResolvedValueOnce(makeModResponse({ harassment: 0.0, hate: 0.0 }));
     const result = await detectHostileTone('text');
 
     expect(result.flagged).toBe(true);
     expect(result.reason).toBe('degraded');
 
-    // The 4th fetch mock was not consumed — fetch was only called 3 times.
     expect(mockFetch).toHaveBeenCalledTimes(3);
+    // No additional app_settings read — cache covered it.
+    expect(mockMaybeSingle.mock.calls.length).toBe(maybeSingleBefore);
   });
 
-  it('increments RPC after 3rd failure crosses threshold', async () => {
+  it('calls increment_moderation_breaker_failures on every failure', async () => {
+    mockRpc
+      .mockResolvedValueOnce(makeIncrementResponse(1))
+      .mockResolvedValueOnce(makeIncrementResponse(2))
+      .mockResolvedValueOnce(makeIncrementResponse(3));
+
     for (let i = 0; i < 3; i++) {
       mockFetch.mockResolvedValueOnce(makeErrorResponse(503));
       await detectHostileTone('text');
     }
 
-    expect(mockRpc).toHaveBeenCalledWith('increment_moderation_breaker_failures', {
-      p_provider: 'openrouter',
+    const incrementCalls = mockRpc.mock.calls.filter(
+      (args) => args[0] === 'increment_moderation_breaker_failures',
+    );
+    expect(incrementCalls).toHaveLength(3);
+    expect(incrementCalls[0][1]).toEqual({ p_provider: 'openrouter' });
+  });
+
+  it('treats DB-stored open breaker as authoritative on cold cache (no fetch)', async () => {
+    // Simulate another process having opened the breaker recently.
+    setAppSettingsBreaker({
+      openrouter: { failures: 3, opened_at: new Date().toISOString() },
     });
+
+    // First call has no in-memory cache — must read DB, see open, skip fetch.
+    mockFetch.mockResolvedValueOnce(makeModResponse({ harassment: 0.0, hate: 0.0 }));
+    const result = await detectHostileTone('text');
+
+    expect(result.flagged).toBe(true);
+    expect(result.reason).toBe('degraded');
+    expect(mockFetch).not.toHaveBeenCalled();
+    // app_settings read was attempted exactly once.
+    expect(mockMaybeSingle).toHaveBeenCalledTimes(1);
   });
 
-  it('after breaker window elapses (half-open), probe call resets breaker on success', async () => {
-    vi.useFakeTimers();
+  it('after breaker window elapses (half-open), probe call resets breaker on success via reset RPC', async () => {
+    // Open the breaker with a stored opened_at well in the past.
+    const openedAtPast = new Date(Date.now() - 61_000).toISOString();
+    setAppSettingsBreaker({
+      openrouter: { failures: 3, opened_at: openedAtPast },
+    });
 
-    // Open the breaker with 3 failures.
-    for (let i = 0; i < 3; i++) {
-      mockFetch.mockResolvedValueOnce(makeErrorResponse(503));
-      await detectHostileTone('text');
-    }
-
-    // Advance past the 60s breaker window.
-    vi.advanceTimersByTime(61_000);
-
-    // Half-open probe call — returns a clean response.
+    // Half-open: cold cache reads DB → sees half-open → allows probe.
     mockFetch.mockResolvedValueOnce(makeModResponse({ harassment: 0.1, hate: 0.0 }));
     const result = await detectHostileTone('hello world');
 
     expect(result.flagged).toBe(false);
     expect(result.reason).toBe('clean');
 
-    // Should call reset RPC.
     expect(mockRpc).toHaveBeenCalledWith('reset_moderation_breaker', {
       p_provider: 'openrouter',
     });
   });
 
-  it('bug-class 4xx errors do NOT increment the breaker failure count', async () => {
-    // 5 bug-class calls: none should open the breaker.
+  it('bug-class 4xx errors do NOT increment the breaker (no RPC call, breaker stays closed)', async () => {
+    // 5 bug-class calls: none should call the increment RPC.
     for (let i = 0; i < 5; i++) {
       mockFetch.mockResolvedValueOnce(makeErrorResponse(400, { error: { code: 'bad_request' } }));
       const r = await detectHostileTone('text');
@@ -392,7 +455,6 @@ describe('circuit breaker', () => {
       expect(r.reason).toBe('degraded');
     }
 
-    // Breaker NOT opened — RPC for increment_moderation_breaker_failures not called.
     const incrementCalls = mockRpc.mock.calls.filter(
       (args) => args[0] === 'increment_moderation_breaker_failures',
     );

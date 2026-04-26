@@ -14,13 +14,19 @@ vi.mock('@/lib/flags', () => ({
   isEnabled: vi.fn().mockReturnValue(false),
 }));
 
+const mockReportSchemaSafeParse = vi.fn();
+
 vi.mock('@/lib/llm/prompts/report', () => ({
   buildReportPrompt: vi.fn().mockReturnValue({
     system: 'report-system',
     messages: [{ role: 'user', content: 'report-user-content' }],
   }),
+  buildReportSchema: vi.fn().mockReturnValue({
+    safeParse: (...args: unknown[]) => mockReportSchemaSafeParse(...args),
+  }),
+  validateReportQuotes: vi.fn().mockReturnValue({ ok: true, errors: [] }),
   ReportSchema: {
-    safeParse: vi.fn(),
+    safeParse: (...args: unknown[]) => mockReportSchemaSafeParse(...args),
   },
 }));
 
@@ -62,7 +68,6 @@ vi.mock('../../client', () => ({
 // ---------------------------------------------------------------------------
 
 import { getServiceClient } from '@/lib/supabase/service';
-import { ReportSchema } from '@/lib/llm/prompts/report';
 import { FirstMessageSchema } from '@/lib/llm/prompts/first-message';
 import OpenAI from 'openai';
 
@@ -259,10 +264,10 @@ describe('generateReport', () => {
     const supabase = makeSupabaseMock();
     makeOpenAIMock([VALID_REPORT_JSON, VALID_STARTERS_JSON]);
 
-    vi.mocked(ReportSchema.safeParse).mockReturnValue({
+    mockReportSchemaSafeParse.mockReturnValue({
       success: true,
       data: JSON.parse(VALID_REPORT_JSON),
-    } as ReturnType<typeof ReportSchema.safeParse>);
+    } as ReturnType<typeof mockReportSchemaSafeParse>);
 
     vi.mocked(FirstMessageSchema.safeParse).mockReturnValue({
       success: true,
@@ -299,15 +304,15 @@ describe('generateReport', () => {
       VALID_STARTERS_JSON, // starters
     ]);
 
-    vi.mocked(ReportSchema.safeParse)
+    mockReportSchemaSafeParse
       .mockReturnValueOnce({
         success: false,
         error: { message: 'bad schema' },
-      } as unknown as ReturnType<typeof ReportSchema.safeParse>)
+      } as unknown as ReturnType<typeof mockReportSchemaSafeParse>)
       .mockReturnValueOnce({
         success: true,
         data: JSON.parse(VALID_REPORT_JSON),
-      } as ReturnType<typeof ReportSchema.safeParse>);
+      } as ReturnType<typeof mockReportSchemaSafeParse>);
 
     vi.mocked(FirstMessageSchema.safeParse).mockReturnValue({
       success: true,
@@ -325,10 +330,10 @@ describe('generateReport', () => {
     const supabase = makeSupabaseMock();
     makeOpenAIMock(['{"invalid": true}', '{"still_bad": true}', VALID_STARTERS_JSON]);
 
-    vi.mocked(ReportSchema.safeParse).mockReturnValue({
+    mockReportSchemaSafeParse.mockReturnValue({
       success: false,
       error: { message: 'bad schema' },
-    } as unknown as ReturnType<typeof ReportSchema.safeParse>);
+    } as unknown as ReturnType<typeof mockReportSchemaSafeParse>);
 
     vi.mocked(FirstMessageSchema.safeParse).mockReturnValue({
       success: true,
@@ -346,10 +351,10 @@ describe('generateReport', () => {
 
     const reportData = { ...JSON.parse(VALID_REPORT_JSON), compatibility_score: 0.72 };
 
-    vi.mocked(ReportSchema.safeParse).mockReturnValue({
+    mockReportSchemaSafeParse.mockReturnValue({
       success: true,
       data: reportData,
-    } as ReturnType<typeof ReportSchema.safeParse>);
+    } as ReturnType<typeof mockReportSchemaSafeParse>);
 
     vi.mocked(FirstMessageSchema.safeParse).mockReturnValue({
       success: true,

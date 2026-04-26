@@ -10,30 +10,71 @@ export interface BuildReportPromptArgs {
   language: Lang;
 }
 
-export const ReportSchema = z.object({
-  compatibility_score: z.number().min(0).max(1).describe('Compatibility score between 0 and 1'),
-  why_click: z.string().min(50).max(200).describe('Why these two would click — 50-200 characters'),
-  watch_out: z
-    .string()
-    .min(50)
-    .max(200)
-    .describe('Friction point to watch out for — 50-200 characters'),
-  highlight_quotes: z
-    .array(z.string())
-    .min(6)
-    .max(10)
-    .describe('6-10 verbatim quotes from the transcript'),
-  rendered_transcript: z
-    .array(
-      z.object({
-        speaker: z.string(),
-        text: z.string(),
-      }),
-    )
-    .describe('The conversation transcript as speaker/text pairs'),
-});
+/**
+ * Builds a Zod schema for report output that enforces the baseline ±0.1 score invariant.
+ * The compatibility_score must fall within [baseline_score - 0.1, baseline_score + 0.1],
+ * clamped to [0, 1].
+ */
+export function buildReportSchema(baseline_score: number): ReturnType<typeof _buildReportSchema> {
+  const lo = Math.max(0, baseline_score - 0.1);
+  const hi = Math.min(1, baseline_score + 0.1);
+  return _buildReportSchema(lo, hi);
+}
 
-export type ReportOutput = z.infer<typeof ReportSchema>;
+function _buildReportSchema(lo: number, hi: number) {
+  return z.object({
+    compatibility_score: z
+      .number()
+      .min(lo)
+      .max(hi)
+      .describe(`Compatibility score between ${lo.toFixed(2)} and ${hi.toFixed(2)}`),
+    why_click: z
+      .string()
+      .min(50)
+      .max(200)
+      .describe('Why these two would click — 50-200 characters'),
+    watch_out: z
+      .string()
+      .min(50)
+      .max(200)
+      .describe('Friction point to watch out for — 50-200 characters'),
+    highlight_quotes: z
+      .array(z.string())
+      .min(6)
+      .max(10)
+      .describe('6-10 verbatim quotes from the transcript'),
+    rendered_transcript: z
+      .array(
+        z.object({
+          speaker: z.string(),
+          text: z.string(),
+        }),
+      )
+      .describe('The conversation transcript as speaker/text pairs'),
+  });
+}
+
+/** Static schema covering the full [0,1] range — used in tests and legacy callers. */
+export const ReportSchema = _buildReportSchema(0, 1);
+
+export type ReportOutput = z.infer<ReturnType<typeof buildReportSchema>>;
+
+/**
+ * Validates that every highlight_quote is a verbatim substring of the transcript text.
+ */
+export function validateReportQuotes(
+  report: { highlight_quotes: string[] },
+  transcript: TranscriptTurn[],
+): { ok: boolean; errors: string[] } {
+  const transcriptText = transcript.map((t) => t.text).join(' ');
+  const errors: string[] = [];
+  for (const quote of report.highlight_quotes) {
+    if (!transcriptText.includes(quote)) {
+      errors.push(`Quote not verbatim: "${quote.slice(0, 60)}..."`);
+    }
+  }
+  return { ok: errors.length === 0, errors };
+}
 
 function formatTranscript(transcript: TranscriptTurn[]): string {
   return transcript.map((t) => `${t.speaker}: ${t.text}`).join('\n');
@@ -119,5 +160,5 @@ Respond with only the following JSON:
     },
   ];
 
-  return { system, messages, schema: ReportSchema };
+  return { system, messages, schema: buildReportSchema(baseline_score) };
 }

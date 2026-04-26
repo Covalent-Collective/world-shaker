@@ -349,6 +349,58 @@ describe('GET /api/conversation/[id]/stream — Realtime dedup', () => {
 
     await reader.cancel();
   });
+
+  it('subscribe-before-replay: a turn arriving DURING replay is delivered exactly once after replay completes', async () => {
+    // Race scenario the new ordering must close:
+    //   t0: SUBSCRIBED fires
+    //   t1: a new INSERT (turn_index=3) lands via Realtime — buffered
+    //   t2: replay query returns rows 1..2 — emitted
+    //   t3: buffer is flushed; turn 3 is emitted exactly once
+    //
+    // The replay snapshot does NOT include turn 3 (it landed mid-flight),
+    // so the only path for it to reach the client is the post-replay flush.
+    const token = await tokenFor(WORLD_USER);
+    setOwner(WORLD_USER);
+
+    let captured: ((p: { new: Record<string, unknown> }) => void) | null = null;
+    channelOn.mockImplementation((_type, _filter, cb) => {
+      captured = cb as typeof captured;
+      return { subscribe: channelSubscribe };
+    });
+
+    // Fire the buffered Realtime payload from inside the SUBSCRIBED callback —
+    // this models the worst case where the INSERT arrives before the replay
+    // query runs. The route should buffer it (not emit) until after replay.
+    channelSubscribe.mockImplementation((cb?: (status: string) => void) => {
+      cb?.('SUBSCRIBED');
+      // After subscribe completes, the route then runs replay; emit a Realtime
+      // event right now so it lands during the subscribe-or-replay window.
+      captured?.({ new: { turn_index: 3, text: 'mid-race', speaker_agent_id: 'b' } });
+      return { on: channelOn };
+    });
+
+    replayStub.data = [
+      { turn_index: 1, text: 'one', speaker_agent_id: 'a' },
+      { turn_index: 2, text: 'two', speaker_agent_id: 'b' },
+    ];
+
+    const res = await callRoute({ cookie: { value: token } });
+    const reader = res.body!.getReader();
+
+    // Drain until we see turn 3 — guarantees both replay and flush happened.
+    const out = await readUntil(reader, (acc) => acc.includes('id: 3\n'));
+
+    expect(out).toContain('id: 1\n');
+    expect(out).toContain('id: 2\n');
+    expect(out).toContain('id: 3\n');
+    expect(out).toContain('"text":"mid-race"');
+
+    // Exactly-once: turn 3 should appear in the stream only one time.
+    const occurrences = out.split('id: 3\n').length - 1;
+    expect(occurrences).toBe(1);
+
+    await reader.cancel();
+  });
 });
 
 // ---------------------------------------------------------------------------

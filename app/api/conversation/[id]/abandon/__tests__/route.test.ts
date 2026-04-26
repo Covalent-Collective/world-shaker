@@ -244,10 +244,10 @@ describe('POST /api/conversation/[id]/abandon', () => {
     expect(mockInsert).toHaveBeenCalledOnce();
     expect(mockInsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'wont_connect',
+        event_type: 'wont_connect',
         user_id: USER_ID,
         source_screen: 'conversation_overlay',
-        conversation_id: CONV_ID,
+        metadata: { conversation_id: CONV_ID },
       }),
     );
   });

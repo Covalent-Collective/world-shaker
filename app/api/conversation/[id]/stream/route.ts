@@ -21,11 +21,15 @@ import { getServiceClient } from '@/lib/supabase/service';
  *      treat any auth failure as forbidden access.
  *   2. Ownership: service-role JOIN against conversations + agents to ensure
  *      the world user owns one of the conversation's agents.
- *   3. Initial replay: SELECT turns with turn_index > Last-Event-ID to support
+ *   3. Realtime subscribe FIRST: postgres_changes INSERT, filtered by
+ *      conversation_id. Subscribing before replay closes the lost-turn race:
+ *      any INSERT that lands while replay is in flight is buffered and then
+ *      flushed (with dedupe) after replay completes.
+ *   4. Initial replay: SELECT turns with turn_index > Last-Event-ID to support
  *      EventSource resume (browser auto-attaches Last-Event-ID on reconnect).
- *   4. Realtime subscribe: postgres_changes INSERT, filtered by conversation_id.
- *      Race-safe: any incoming Realtime turn_index <= max(replay) is dropped
- *      to avoid double-emitting a turn that landed during the replay window.
+ *      Once replay is done, the buffered Realtime payloads are emitted in
+ *      order, dropping anything turn_index <= lastSeen so each turn is sent
+ *      exactly once.
  *   5. Status backstop: poll conversations.status every 5s; emit `complete`
  *      and close on terminal status. This is the safety net if Realtime drops
  *      the final INSERT or the orchestrator finishes without a final emit.
@@ -33,7 +37,8 @@ import { getServiceClient } from '@/lib/supabase/service';
  *      timing out the connection.
  *
  * Streaming flow (top-to-bottom inside the ReadableStream pull/start):
- *   start() -> auth -> ownership -> emit replay -> subscribe -> intervals
+ *   start() -> auth -> ownership -> subscribe (buffer) -> replay -> flush
+ *           -> intervals
  *   cancel() -> unsubscribe + clear all intervals
  *
  * NOTE on testing: SSE is hard to drive end-to-end through vitest because
@@ -175,28 +180,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         }
       };
 
-      // ---- 3a. Initial replay -----------------------------------------
-      const { data: replayRows, error: replayError } = await supabase
-        .from('conversation_turns')
-        .select('turn_index, text, speaker_agent_id')
-        .eq('conversation_id', conversationId)
-        .gt('turn_index', lastEventIdFloor)
-        .order('turn_index', { ascending: true });
-
-      if (replayError) {
-        console.error('stream replay error:', replayError);
-        safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: 'replay_failed' })}\n\n`);
-        teardown();
-        return;
-      }
-
+      // ---- 3a. Subscribe FIRST (race-safe ordering) -------------------
+      //
+      // Order matters: if we replay before subscribing, any INSERT that
+      // lands between "replay completed" and "Realtime SUBSCRIBED" is lost
+      // — it isn't in the replay snapshot, and it never reaches us via
+      // Realtime. To close the gap:
+      //
+      //   1. .on() handler is registered up front.
+      //   2. While we wait for SUBSCRIBED + run replay, every Realtime
+      //      payload is BUFFERED (not emitted).
+      //   3. After replay completes we flush the buffer, dropping any
+      //      payload whose turn_index is already covered by replay.
+      //
+      // `lastSeen` is the watermark used both for replay-vs-realtime
+      // dedupe and for filtering buffered events on flush.
       let lastSeen = lastEventIdFloor;
-      for (const row of (replayRows ?? []) as ConversationTurnRow[]) {
-        safeEnqueue(formatTurnEvent(row));
-        if (row.turn_index > lastSeen) lastSeen = row.turn_index;
-      }
+      let replayComplete = false;
+      const buffered: ConversationTurnRow[] = [];
 
-      // ---- 3b. Subscribe to Realtime ----------------------------------
       channel = supabase.channel(`conv:${conversationId}`).on(
         REALTIME_LISTEN_TYPES.POSTGRES_CHANGES,
         {
@@ -207,10 +209,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
         },
         (payload: RealtimePostgresInsertPayload<ConversationTurnRow>) => {
           const row = payload.new;
-          // Race-safe dedup: drop turns we already emitted in replay.
-          if (typeof row.turn_index !== 'number' || row.turn_index <= lastSeen) {
+          if (typeof row.turn_index !== 'number') return;
+          if (!replayComplete) {
+            // Buffer until replay finishes; flush handles dedupe.
+            buffered.push(row);
             return;
           }
+          // Steady state: drop turns we already emitted (replay or earlier flush).
+          if (row.turn_index <= lastSeen) return;
           lastSeen = row.turn_index;
           safeEnqueue(formatTurnEvent(row));
         },
@@ -227,10 +233,44 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           ) {
             // Resolve even on failure — the status backstop will keep the
             // stream alive and eventually close it via terminal status.
+            // Buffered events (if any) will still be flushed below; the
+            // status poller is the safety net for missed inserts.
             resolve();
           }
         });
       });
+
+      // ---- 3b. Initial replay (now that we're subscribed) -------------
+      const { data: replayRows, error: replayError } = await supabase
+        .from('conversation_turns')
+        .select('turn_index, text, speaker_agent_id')
+        .eq('conversation_id', conversationId)
+        .gt('turn_index', lastEventIdFloor)
+        .order('turn_index', { ascending: true });
+
+      if (replayError) {
+        console.error('stream replay error:', replayError);
+        safeEnqueue(`event: error\ndata: ${JSON.stringify({ error: 'replay_failed' })}\n\n`);
+        teardown();
+        return;
+      }
+
+      for (const row of (replayRows ?? []) as ConversationTurnRow[]) {
+        safeEnqueue(formatTurnEvent(row));
+        if (row.turn_index > lastSeen) lastSeen = row.turn_index;
+      }
+
+      // ---- 3c. Flush buffered Realtime events -------------------------
+      // Anything received during the subscribe-or-replay window that the
+      // replay snapshot didn't already cover gets emitted here exactly once.
+      replayComplete = true;
+      for (const row of buffered) {
+        if (row.turn_index > lastSeen) {
+          lastSeen = row.turn_index;
+          safeEnqueue(formatTurnEvent(row));
+        }
+      }
+      buffered.length = 0;
 
       // If status was already terminal at connect time, emit + close.
       if (TERMINAL_STATUSES.has(ownership.status)) {

@@ -237,18 +237,22 @@ async function fetchTurns(
 async function fetchMatch(
   db: Awaited<ReturnType<typeof getDb>>,
   conversationId: string,
+  agentAUserId: string,
 ): Promise<MatchRow | null> {
+  // generate-report writes 2 bidirectional match rows per conversation (one per
+  // participant). We fetch the full array and pick the row belonging to agent_a's
+  // user so the transcript dump is deterministic and readable.
   const { data, error } = await db
     .from('matches')
     .select('*')
-    .eq('conversation_id', conversationId)
-    .maybeSingle<MatchRow>();
+    .eq('conversation_id', conversationId);
 
   if (error) {
     console.error(`  WARN could not fetch match for ${conversationId}:`, error.message);
     return null;
   }
-  return data ?? null;
+  const rows = (data ?? []) as MatchRow[];
+  return rows.find((r) => r.user_id === agentAUserId) ?? rows[0] ?? null;
 }
 
 // ── Pair key computation ──────────────────────────────────────────────────────
@@ -285,17 +289,22 @@ async function main(): Promise<void> {
       `ERROR: Not enough seed agents. Found ${seedCount ?? 0}, need ${needed} (2 × --pairs ${N}).`,
     );
     console.error(
-      `       Apply migration 0007 and populate the seed pool before running this script.`,
+      `       This script requires the Phase 4 seed pool (migration 0007) to be applied`,
     );
-    console.error(`       See Phase 4 seed pool setup in the plan.`);
+    console.error(
+      `       and the agents table populated with is_seed=true rows before it can run.`,
+    );
+    console.error(`       This script CANNOT run in production until migration 0007 lands.`);
+    console.error(`       See Phase 4 seed pool setup in the plan for instructions.`);
     process.exit(2);
   }
 
-  // Select 2*N seed agents.
+  // Select 2*N seed agents ordered by id for deterministic pair selection across runs.
   const { data: seedAgents, error: agentsErr } = await db
     .from('agents')
     .select('id, user_id')
     .eq('is_seed', true)
+    .order('id', { ascending: true })
     .limit(needed);
 
   if (agentsErr || !seedAgents) {
@@ -364,7 +373,7 @@ async function main(): Promise<void> {
 
     // Fetch turns and match.
     const turns = await fetchTurns(db, conversationId);
-    const match = await fetchMatch(db, conversationId);
+    const match = await fetchMatch(db, conversationId, a.user_id);
 
     const durationMs = Date.now() - startMs;
     const result: SmokeResult = {

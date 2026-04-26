@@ -19,3 +19,4 @@ lib/auth/rate-limit.ts
 lib/quota/daily.ts
 lib/llm/safety.ts
 lib/llm/budget.ts
+app/api/conversation/[id]/abandon/route.ts

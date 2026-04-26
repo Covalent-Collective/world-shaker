@@ -91,10 +91,10 @@ export async function POST(
 
   // ── Outcome event ───────────────────────────────────────────────────────────
   const { error: eventError } = await supabase.from('outcome_events').insert({
-    type: 'wont_connect',
+    event_type: 'wont_connect',
     user_id: worldUserId,
     source_screen: 'conversation_overlay',
-    conversation_id: conversationId,
+    metadata: { conversation_id: conversationId },
   });
 
   if (eventError) {

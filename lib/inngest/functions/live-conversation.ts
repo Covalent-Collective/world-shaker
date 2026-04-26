@@ -50,7 +50,8 @@ export type ConversationStartPayload = {
   surface: 'dating';
   agent_a_id: string;
   agent_b_id: string;
-  pair_key: string;
+  /** @deprecated pair_key is now computed internally from agent_a_id and agent_b_id. Any value supplied here is ignored. */
+  pair_key?: string;
   language: Lang;
   max_turns?: number;
 };
@@ -101,8 +102,13 @@ export const liveConversation = inngest.createFunction(
   },
   async ({ event, step, logger }) => {
     const payload = event.data as ConversationStartPayload;
-    const { user_id, surface, agent_a_id, agent_b_id, pair_key, language } = payload;
+    const { user_id, surface, agent_a_id, agent_b_id, language } = payload;
     const maxTurns = Math.min(payload.max_turns ?? DEFAULT_MAX_TURNS, DEFAULT_MAX_TURNS);
+
+    // Canonical pair_key: computed internally so callers cannot inject an
+    // arbitrary key. Matches the SQL generated column formula in 0001_initial.sql.
+    const pair_key =
+      agent_a_id < agent_b_id ? `${agent_a_id}|${agent_b_id}` : `${agent_b_id}|${agent_a_id}`;
 
     const supabase = getServiceClient();
 
@@ -176,6 +182,37 @@ export const liveConversation = inngest.createFunction(
       const stage = inferStage(turn_index);
       const turn_speaker = whoseTurn(turn_index);
       const speaker_agent_id = turn_speaker === 'a' ? agent_a_id : agent_b_id;
+
+      // 4a-pre. Per-turn budget check (v4 AC-23). Runs before every streamChat
+      // call so a cap exceeded mid-conversation aborts immediately without
+      // charging another turn. The initial pre-flight (before allocate) is the
+      // fast-fail before any DB writes; this is the per-turn safeguard.
+      const turnPreflight = await step.run(`preflight-turn-${turn_index}`, async () => {
+        return assertBudgetAvailable(user_id);
+      });
+
+      if (!turnPreflight.ok) {
+        await step.run(`mark-failed-budget-turn-${turn_index}`, async () => {
+          const { error } = await supabase
+            .from('conversations')
+            .update({ status: 'failed' })
+            .eq('id', conversation_id)
+            .eq('status', 'live');
+          if (error) throw new Error(`mark-failed-budget UPDATE failed: ${error.message}`);
+        });
+        await step.sendEvent(`emit-conversation-failed-budget-turn-${turn_index}`, {
+          name: CONVERSATION_FAILED_EVENT,
+          data: {
+            conversation_id,
+            reason: `cost_cap_exceeded:${turnPreflight.reason ?? 'unknown'}`,
+            turn_index,
+          },
+        });
+        logger.warn(
+          `live-conversation: budget cap exceeded at turn=${turn_index} reason=${turnPreflight.reason ?? 'unknown'}`,
+        );
+        return { conversation_id, status: 'failed', turn_index, reason: 'cost_cap_exceeded' };
+      }
 
       // 4a. Generate the next turn.
       const turn = await step.run(`turn-${turn_index}-generate`, async () => {

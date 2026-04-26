@@ -3,7 +3,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildPersonaPrompt } from '../persona';
 import { buildDialoguePrompt } from '../agent-dialogue';
-import { buildReportPrompt, ReportSchema } from '../report';
+import {
+  buildReportPrompt,
+  buildReportSchema,
+  validateReportQuotes,
+  ReportSchema,
+} from '../report';
 import { buildFirstMessagePrompt, FirstMessageSchema } from '../first-message';
 import { buildInterviewProbePrompt, InterviewProbeSchema } from '../interview-probe';
 import type { ExtractedFeatures, PersonaProfile, TranscriptTurn } from '../types';
@@ -393,6 +398,49 @@ describe('buildReportPrompt (US-209)', () => {
       language: 'en',
     });
     expect(high.system).toContain('1.00');
+  });
+
+  it('buildReportSchema rejects score outside baseline ±0.1 (score 0.4, baseline 0.6)', () => {
+    const schema = buildReportSchema(0.6);
+    const invalid = {
+      compatibility_score: 0.4,
+      why_click: 'A'.repeat(60),
+      watch_out: 'B'.repeat(60),
+      highlight_quotes: Array(6).fill('quote'),
+      rendered_transcript: sampleTranscript,
+    };
+    expect(schema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('buildReportSchema accepts score within baseline ±0.1 (score 0.65, baseline 0.6)', () => {
+    const schema = buildReportSchema(0.6);
+    const valid = {
+      compatibility_score: 0.65,
+      why_click: 'A'.repeat(60),
+      watch_out: 'B'.repeat(60),
+      highlight_quotes: Array(6).fill('quote'),
+      rendered_transcript: sampleTranscript,
+    };
+    expect(schema.safeParse(valid).success).toBe(true);
+  });
+
+  it('validateReportQuotes rejects quote not verbatim in transcript', () => {
+    const report = { highlight_quotes: ['This quote is not in the transcript at all.'] };
+    const result = validateReportQuotes(report, sampleTranscript);
+    expect(result.ok).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it('validateReportQuotes accepts verbatim quotes from transcript', () => {
+    const report = {
+      highlight_quotes: [
+        'I love hiking because it clears my mind.',
+        'The coastal paths near my hometown are my favorite.',
+      ],
+    };
+    const result = validateReportQuotes(report, sampleTranscript);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toHaveLength(0);
   });
 });
 

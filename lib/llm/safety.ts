@@ -12,6 +12,7 @@ const MODERATION_MODEL = 'openai/omni-moderation-latest';
 const FETCH_TIMEOUT_MS = 800;
 const BREAKER_WINDOW_MS = 60_000; // 60 seconds
 const BREAKER_THRESHOLD = 3; // failures before opening
+const BREAKER_CACHE_TTL_MS = 10_000; // 10s in-memory mirror of DB state
 const TRIGRAM_OVERLAP_THRESHOLD = 0.8; // 80% overlap triggers loop detection
 const LOOP_WINDOW = 5; // check last N turns
 
@@ -27,69 +28,130 @@ export interface ModerationResult {
   reason?: ModerationReason;
 }
 
+/** Per-provider breaker state as stored in app_settings.moderation_breaker_state. */
 interface BreakerEntry {
   failures: number;
-  openedAt: number; // ms timestamp
+  openedAtMs: number; // 0 == never opened
+}
+
+/** Cached snapshot of breaker state for a provider, with expiry. */
+interface BreakerCache {
+  entry: BreakerEntry;
+  fetchedAtMs: number;
 }
 
 // ---------------------------------------------------------------------------
-// In-memory circuit breaker state
+// Circuit breaker — DB is the source of truth, with a short-lived in-memory
+// cache (TTL 10s) to bound RPC pressure on the hot path.
 // ---------------------------------------------------------------------------
 
-const breakerState = new Map<string, BreakerEntry>();
+const breakerCache = new Map<string, BreakerCache>();
 
 /**
- * Reset breaker state for a provider. Used in tests only.
+ * Reset cached breaker state. Used in tests only — does NOT reset the DB row.
  * @internal
  */
 export function _resetBreakerForTesting(provider?: string): void {
   if (provider) {
-    breakerState.delete(provider);
+    breakerCache.delete(provider);
   } else {
-    breakerState.clear();
+    breakerCache.clear();
   }
 }
 
-function getBreakerEntry(provider: string): BreakerEntry {
-  return breakerState.get(provider) ?? { failures: 0, openedAt: 0 };
+/** Parse the JSONB shape returned by the breaker RPCs / app_settings row. */
+function parseBreakerJson(raw: unknown): BreakerEntry {
+  if (!raw || typeof raw !== 'object') {
+    return { failures: 0, openedAtMs: 0 };
+  }
+  const obj = raw as { failures?: unknown; opened_at?: unknown };
+  const failures = typeof obj.failures === 'number' ? obj.failures : 0;
+  let openedAtMs = 0;
+  if (typeof obj.opened_at === 'string') {
+    const parsed = Date.parse(obj.opened_at);
+    if (Number.isFinite(parsed)) openedAtMs = parsed;
+  } else if (typeof obj.opened_at === 'number' && Number.isFinite(obj.opened_at)) {
+    openedAtMs = obj.opened_at;
+  }
+  return { failures, openedAtMs };
+}
+
+/** Read breaker state for a provider from the cache, or fetch from DB. */
+async function loadBreakerState(provider: string): Promise<BreakerEntry> {
+  const now = Date.now();
+  const cached = breakerCache.get(provider);
+  if (cached && now - cached.fetchedAtMs < BREAKER_CACHE_TTL_MS) {
+    return cached.entry;
+  }
+
+  let entry: BreakerEntry = { failures: 0, openedAtMs: 0 };
+  try {
+    const client = getServiceClient();
+    const { data, error } = await client
+      .from('app_settings')
+      .select('moderation_breaker_state')
+      .eq('id', 1)
+      .maybeSingle();
+    if (!error && data) {
+      const state = (data as { moderation_breaker_state?: Record<string, unknown> })
+        .moderation_breaker_state;
+      if (state && typeof state === 'object') {
+        entry = parseBreakerJson(state[provider]);
+      }
+    }
+  } catch {
+    // Non-fatal: fall back to last-known cache, otherwise zero.
+    if (cached) return cached.entry;
+  }
+
+  breakerCache.set(provider, { entry, fetchedAtMs: now });
+  return entry;
 }
 
 function isBreakOpen(entry: BreakerEntry, now: number): boolean {
-  return entry.openedAt > 0 && now - entry.openedAt < BREAKER_WINDOW_MS;
+  return (
+    entry.failures >= BREAKER_THRESHOLD &&
+    entry.openedAtMs > 0 &&
+    now - entry.openedAtMs < BREAKER_WINDOW_MS
+  );
 }
 
 function isHalfOpen(entry: BreakerEntry, now: number): boolean {
-  return entry.openedAt > 0 && now - entry.openedAt >= BREAKER_WINDOW_MS;
+  return (
+    entry.failures >= BREAKER_THRESHOLD &&
+    entry.openedAtMs > 0 &&
+    now - entry.openedAtMs >= BREAKER_WINDOW_MS
+  );
 }
 
 async function recordFailure(provider: string): Promise<void> {
-  const entry = getBreakerEntry(provider);
-  const now = Date.now();
-
-  // Increment in-memory failure count.
-  const newFailures = entry.failures + 1;
-  const openedAt = newFailures >= BREAKER_THRESHOLD ? now : entry.openedAt;
-  breakerState.set(provider, { failures: newFailures, openedAt });
-
-  // Persist to Supabase after hitting the threshold.
-  if (newFailures >= BREAKER_THRESHOLD) {
-    try {
-      const client = getServiceClient();
-      await client.rpc('increment_moderation_breaker_failures', { p_provider: provider });
-    } catch {
-      // Non-fatal: in-memory state is authoritative for this process.
-    }
+  // Always call the RPC; it atomically increments and returns the new state.
+  // The cache is invalidated (overwritten) with the authoritative response.
+  try {
+    const client = getServiceClient();
+    const { data } = await client.rpc('increment_moderation_breaker_failures', {
+      p_provider: provider,
+    });
+    const entry = parseBreakerJson(data);
+    breakerCache.set(provider, { entry, fetchedAtMs: Date.now() });
+  } catch {
+    // Non-fatal: drop cache so the next read re-syncs from DB.
+    breakerCache.delete(provider);
   }
 }
 
 async function recordSuccess(provider: string): Promise<void> {
-  breakerState.set(provider, { failures: 0, openedAt: 0 });
   try {
     const client = getServiceClient();
     await client.rpc('reset_moderation_breaker', { p_provider: provider });
   } catch {
-    // Non-fatal.
+    // Non-fatal — cache is updated below regardless so the local process
+    // doesn't keep returning degraded against a stale view.
   }
+  breakerCache.set(provider, {
+    entry: { failures: 0, openedAtMs: 0 },
+    fetchedAtMs: Date.now(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -252,14 +314,15 @@ const PROVIDER = 'openrouter';
 
 async function runModeration(text: string): Promise<FetchOutcome> {
   const now = Date.now();
-  const entry = getBreakerEntry(PROVIDER);
+  const entry = await loadBreakerState(PROVIDER);
 
-  // Breaker open — skip network call.
+  // Breaker open per DB state — skip network call entirely.
   if (isBreakOpen(entry, now)) {
     return { kind: 'failure' };
   }
 
-  // Half-open — allow one probe call.
+  // Either closed or half-open — attempt the call. Half-open lets one probe
+  // through; on success we reset, on failure the RPC re-opens.
   const outcome = await callModeration(text);
 
   if (outcome.kind === 'failure') {
@@ -272,12 +335,9 @@ async function runModeration(text: string): Promise<FetchOutcome> {
     return { kind: 'bug' };
   }
 
-  // Success — reset breaker if it was half-open.
+  // Success — if we were half-open, reset DB + cache.
   if (isHalfOpen(entry, now)) {
     await recordSuccess(PROVIDER);
-  } else if (entry.failures > 0) {
-    // Partial recovery: reset in-memory count.
-    breakerState.set(PROVIDER, { failures: 0, openedAt: 0 });
   }
 
   return outcome;

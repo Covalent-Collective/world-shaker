@@ -1,7 +1,11 @@
 import { inngest } from '../client';
 import { getServiceClient } from '@/lib/supabase/service';
 import { isEnabled } from '@/lib/flags';
-import { buildReportPrompt, ReportSchema } from '@/lib/llm/prompts/report';
+import {
+  buildReportPrompt,
+  buildReportSchema,
+  validateReportQuotes,
+} from '@/lib/llm/prompts/report';
 import { buildFirstMessagePrompt, FirstMessageSchema } from '@/lib/llm/prompts/first-message';
 import { DEFAULT_CHAT_MODEL } from '@/lib/llm/openrouter';
 import type { PersonaProfile } from '@/lib/llm/prompts/types';
@@ -131,7 +135,7 @@ export const generateReport = inngest.createFunction(
       return entry?.score ?? 0.5;
     });
 
-    // Step 6-7: Build report prompt and call OpenRouter (with one retry on invalid JSON)
+    // Step 6-7: Build report prompt and call OpenRouter (with one retry on schema/quote violations)
     const reportOutput = await step.run('generate-report-llm', async () => {
       const language = isEnabled('BILINGUAL_PROMPTS_V1') ? 'ko' : 'ko'; // default ko per spec
       const personaA: PersonaProfile = { extracted_features: agentA.extracted_features };
@@ -145,28 +149,54 @@ export const generateReport = inngest.createFunction(
         language,
       });
 
+      const reportSchema = buildReportSchema(baselineScore);
+
       let raw = await callOpenRouterJson(
         promptResult.system,
         promptResult.messages[0]?.content ?? '',
       );
 
-      let parsed = ReportSchema.safeParse(JSON.parse(raw));
+      let parsed = reportSchema.safeParse(JSON.parse(raw));
+      let quoteValidation = parsed.success
+        ? validateReportQuotes(parsed.data, transcript)
+        : { ok: false, errors: ['schema_invalid'] };
 
-      if (!parsed.success) {
-        logger.warn('report_json_invalid on first try; retrying with stricter prompt');
+      if (!parsed.success || !quoteValidation.ok) {
+        const issues = parsed.success ? quoteValidation.errors.join('; ') : parsed.error.message;
+        logger.warn(`report_invalid on first try (${issues}); retrying with stricter prompt`);
         const strictSystem =
           promptResult.system +
-          '\n\nCRITICAL: Your previous response did not match the required schema. ' +
-          'Respond ONLY with valid JSON matching the schema exactly. No extra fields.';
+          '\n\nCRITICAL: Your previous response had validation errors: ' +
+          issues +
+          '\nRespond ONLY with valid JSON. highlight_quotes MUST be exact verbatim substrings of the transcript. No extra fields.';
         raw = await callOpenRouterJson(strictSystem, promptResult.messages[0]?.content ?? '');
-        parsed = ReportSchema.safeParse(JSON.parse(raw));
+        parsed = reportSchema.safeParse(JSON.parse(raw));
+        quoteValidation = parsed.success
+          ? validateReportQuotes(parsed.data, transcript)
+          : { ok: false, errors: ['schema_invalid'] };
       }
 
       if (!parsed.success) {
         throw new Error(`report_schema_invalid: ${parsed.error.message}`);
       }
+      if (!quoteValidation.ok) {
+        throw new Error(`report_quotes_invalid: ${quoteValidation.errors.join('; ')}`);
+      }
 
-      return parsed.data;
+      const result = parsed.data;
+
+      // Enforce rendered_transcript equals input transcript (LLM must not modify it)
+      const transcriptMatches =
+        result.rendered_transcript.length === transcript.length &&
+        result.rendered_transcript.every(
+          (turn, i) => turn.speaker === transcript[i]?.speaker && turn.text === transcript[i]?.text,
+        );
+      if (!transcriptMatches) {
+        logger.warn('rendered_transcript mismatch — replacing with input transcript');
+        result.rendered_transcript = transcript;
+      }
+
+      return result;
     });
 
     // Step 8: Build first-message prompt and parse 2 starters

@@ -189,7 +189,7 @@ const baseEvent = {
     surface: 'dating' as const,
     agent_a_id: 'agent-a',
     agent_b_id: 'agent-b',
-    pair_key: 'agent-a|agent-b',
+    // pair_key intentionally omitted: the function computes it internally now.
     language: 'en' as const,
     max_turns: 4,
   },
@@ -270,10 +270,61 @@ describe('liveConversation Inngest fn', () => {
 
     expect((result as { status: string }).status).toBe('completed');
     expect(sentEvents.find((e) => e.payload.name === 'conversation.completed')).toBeDefined();
-    // Allocation happened.
+    // Allocation happened with canonically computed pair_key (agent-a < agent-b lexically).
     expect(supa.supabase.rpc).toHaveBeenCalledWith(
       'allocate_conversation_attempt',
       expect.objectContaining({ p_pair_key: 'agent-a|agent-b' }),
+    );
+  });
+
+  it('pair_key is computed canonically regardless of event payload order', async () => {
+    const { assertBudgetAvailable } = await import('@/lib/llm/budget');
+    (assertBudgetAvailable as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    const { streamChat } = await import('@/lib/llm/openrouter');
+    (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      streamingChatYielding('Hello there.'),
+    );
+
+    const safety = await import('@/lib/llm/safety');
+    (safety.detectRepeatLoop as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (safety.detectHostileTone as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+    (safety.detectNSFW as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+
+    // Swap agent IDs so B < A lexically to verify canonical ordering is enforced.
+    const swappedAgents = [
+      { id: 'zzz-agent', user_id: 'user-1', extracted_features: { voice: 'A' } },
+      { id: 'aaa-agent', user_id: 'user-2', extracted_features: { voice: 'B' } },
+    ];
+
+    const supa = makeSupabaseMock({
+      agents: swappedAgents,
+      rpcAllocate: () => 'conv-swap',
+      rpcAppend: () => true,
+      heartbeatStillLive: () => Array(10).fill(true),
+    });
+
+    await runFn({
+      supa,
+      eventOverrides: {
+        agent_a_id: 'zzz-agent',
+        agent_b_id: 'aaa-agent',
+        // Supply a wrong pair_key to verify it is ignored.
+        pair_key: 'wrong-key|should-be-ignored',
+        max_turns: 1,
+      } as typeof baseEvent.data & { pair_key?: string },
+    });
+
+    // Canonical key: aaa-agent < zzz-agent lexically -> 'aaa-agent|zzz-agent'.
+    expect(supa.supabase.rpc).toHaveBeenCalledWith(
+      'allocate_conversation_attempt',
+      expect.objectContaining({ p_pair_key: 'aaa-agent|zzz-agent' }),
     );
   });
 
@@ -509,5 +560,65 @@ describe('liveConversation Inngest fn', () => {
 
     expect((result as { status: string }).status).toBe('terminated_externally');
     expect(sentEvents.find((e) => e.payload.name === 'conversation.completed')).toBeUndefined();
+  });
+
+  it('per-turn budget cap: passes turns 0-2, fails at turn 3 -> conversation marked failed, no further turns', async () => {
+    const { assertBudgetAvailable } = await import('@/lib/llm/budget');
+    // Initial preflight + per-turn preflight for turns 0,1,2 -> ok. Turn 3 -> cap exceeded.
+    // mockResolvedValueOnce chains: calls 1-4 (initial + turns 0,1,2) return ok; call 5 (turn 3) returns cap exceeded.
+    const budgetMock = assertBudgetAvailable as unknown as ReturnType<typeof vi.fn>;
+    budgetMock
+      .mockResolvedValueOnce({ ok: true }) // initial preflight
+      .mockResolvedValueOnce({ ok: true }) // turn 0 preflight
+      .mockResolvedValueOnce({ ok: true }) // turn 1 preflight
+      .mockResolvedValueOnce({ ok: true }) // turn 2 preflight
+      .mockResolvedValueOnce({ ok: false, reason: 'global_cap_exceeded' }); // turn 3 -> abort
+
+    const { streamChat } = await import('@/lib/llm/openrouter');
+    (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      streamingChatYielding('some text'),
+    );
+
+    const safety = await import('@/lib/llm/safety');
+    (safety.detectRepeatLoop as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (safety.detectHostileTone as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+    (safety.detectNSFW as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+
+    const supa = makeSupabaseMock({
+      agents: baseAgents,
+      rpcAllocate: () => 'conv-budget-cap',
+      rpcAppend: () => true,
+      heartbeatStillLive: () => Array(10).fill(true),
+    });
+
+    const { result, sentEvents } = await runFn({
+      supa,
+      eventOverrides: { max_turns: 10 },
+    });
+
+    // Aborted at turn 3 due to budget cap.
+    expect((result as { status: string }).status).toBe('failed');
+    expect((result as { turn_index: number }).turn_index).toBe(3);
+    expect((result as { reason: string }).reason).toBe('cost_cap_exceeded');
+
+    // Only turns 0,1,2 were appended (turn 3 aborted before generate).
+    const appendCalls = (
+      supa.supabase.rpc as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[0] === 'append_turn_with_ledger');
+    expect(appendCalls).toHaveLength(3);
+
+    // conversation.failed emitted, conversation.completed NOT emitted.
+    expect(sentEvents.find((e) => e.payload.name === 'conversation.failed')).toBeDefined();
+    expect(sentEvents.find((e) => e.payload.name === 'conversation.completed')).toBeUndefined();
+
+    // The failed event reason contains cost_cap_exceeded.
+    const failedEvent = sentEvents.find((e) => e.payload.name === 'conversation.failed');
+    expect((failedEvent?.payload.data as { reason: string }).reason).toContain('cost_cap_exceeded');
   });
 });
