@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation';
 import AgentFarewell from '@/components/match/AgentFarewell';
 import StarterCard from '@/components/match/StarterCard';
 import VerifiedHumanBadge from '@/components/world/VerifiedHumanBadge';
+import WorldChatCta from '@/components/match/WorldChatCta';
 import { SESSION_COOKIE, verifyWorldUserJwt } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
 
@@ -29,13 +30,29 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
   const db = getServiceClient();
   const { data: match } = await db
     .from('matches')
-    .select('id, status, user_id, starters, world_chat_link')
+    .select('id, status, user_id, candidate_user_id, starters, world_chat_link')
     .eq('id', id)
     .eq('user_id', worldUserId)
     .eq('status', 'mutual')
     .maybeSingle();
 
   if (!match) notFound();
+
+  // Resolve the partner's q0_name (their agent's interview answer) so the
+  // World Chat draft message can address them by the name they chose.
+  let partnerName: string | null = null;
+  if (match.candidate_user_id) {
+    const { data: partnerAgent } = await db
+      .from('agents')
+      .select('interview_answers')
+      .eq('user_id', match.candidate_user_id)
+      .eq('status', 'active')
+      .maybeSingle();
+    const raw = (partnerAgent?.interview_answers as Record<string, unknown> | null)?.q0_name;
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      partnerName = raw.trim();
+    }
+  }
 
   const starters: Array<{ text: string }> = Array.isArray(match.starters) ? match.starters : [];
   const worldChatLink: string = match.world_chat_link ?? '#';
@@ -55,14 +72,7 @@ export default async function MatchSuccessPage({ params }: PageProps): Promise<R
         </section>
       )}
 
-      <a
-        href={worldChatLink}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="w-full max-w-sm rounded-xl bg-foreground text-background py-3 px-6 text-sm font-semibold text-center transition-opacity hover:opacity-80 active:opacity-60"
-      >
-        World Chat에서 만나기
-      </a>
+      <WorldChatCta partnerName={partnerName} fallbackUrl={worldChatLink} />
     </main>
   );
 }
