@@ -43,14 +43,15 @@ export default async function StrollPage(): Promise<React.ReactElement> {
   const t = await getT();
   const serviceClient = getServiceClient();
 
-  // ── app_settings.streaming_paused ────────────────────────────────────────
+  // ── app_settings.streaming_paused + seed_pool_active ────────────────────
   const { data: settingsRow } = await serviceClient
     .from('app_settings')
-    .select('streaming_paused')
+    .select('streaming_paused, seed_pool_active')
     .limit(1)
     .single();
 
   const streamingPaused = settingsRow?.streaming_paused === true;
+  const seedPoolActive = settingsRow?.seed_pool_active ?? true;
 
   if (streamingPaused) {
     return (
@@ -96,6 +97,7 @@ export default async function StrollPage(): Promise<React.ReactElement> {
     target_user: worldUserId,
     k: 10,
     mode: 'stroll_proactive',
+    include_seeds: seedPoolActive,
   });
 
   if (rpcError) {

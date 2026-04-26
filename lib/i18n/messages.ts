@@ -53,6 +53,7 @@ const ko = {
   'safety.report_reason.spam': '스팸',
   'safety.report_reason.other': '기타',
   'safety.detail_placeholder': '추가로 알려주실 내용 (선택)',
+  'safety.hide_and_report': '숨기고 신고하기',
 } as const satisfies Record<MessageKey, string>;
 
 const en = {
@@ -108,6 +109,7 @@ const en = {
   'safety.report_reason.spam': 'Spam',
   'safety.report_reason.other': 'Other',
   'safety.detail_placeholder': 'Anything else? (optional)',
+  'safety.hide_and_report': 'Hide and report',
 } as const satisfies Record<MessageKey, string>;
 
 export const messages = { ko, en } as const satisfies Record<Lang, Record<MessageKey, string>>;

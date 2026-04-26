@@ -52,4 +52,5 @@ export type MessageKey =
   | 'safety.report_reason.nsfw'
   | 'safety.report_reason.spam'
   | 'safety.report_reason.other'
-  | 'safety.detail_placeholder';
+  | 'safety.detail_placeholder'
+  | 'safety.hide_and_report';

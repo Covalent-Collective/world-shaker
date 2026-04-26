@@ -147,6 +147,7 @@ describe('firstEncounter Inngest fn', () => {
     dbState.candidates = [{ candidate_user, score: 0.91, is_seed: false }];
     dbState.candidateAgent = { id: candidate_agent_id, user_id: candidate_user };
     dbState.agent = { avatar_url: null, extracted_features: { tone: 'warm' } };
+    dbState.seedPoolActive = true;
 
     const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id }))) as {
       spawned: boolean;
@@ -164,6 +165,13 @@ describe('firstEncounter Inngest fn', () => {
         ? `${agent_id}|${candidate_agent_id}`
         : `${candidate_agent_id}|${agent_id}`;
     expect(result.pair_key).toBe(expectedPair);
+
+    // RPC called with include_seeds=true (default when seed_pool_active=true).
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: true }),
+    });
 
     // Avatar was generated since avatar_url was null.
     expect(generateAvatar).toHaveBeenCalledWith({
@@ -224,13 +232,10 @@ describe('firstEncounter Inngest fn', () => {
     );
   });
 
-  it('filters out seed candidates when seed_pool_active=false', async () => {
+  it('passes include_seeds=false to RPC when seed_pool_active=false', async () => {
     dbState.seedPoolActive = false;
-    // Two candidates: seed + non-seed. Only non-seed should survive the filter.
-    dbState.candidates = [
-      { candidate_user: 'user-seed', score: 0.95, is_seed: true },
-      { candidate_user: 'user-real', score: 0.8, is_seed: false },
-    ];
+    // RPC honours include_seeds at SQL level; mock returns only non-seed rows.
+    dbState.candidates = [{ candidate_user: 'user-real', score: 0.8, is_seed: false }];
     dbState.candidateAgent = { id: 'agent-real', user_id: 'user-real' };
     dbState.agent = { avatar_url: '/avatar.png', extracted_features: {} };
 
@@ -240,16 +245,20 @@ describe('firstEncounter Inngest fn', () => {
     };
 
     expect(result.spawned).toBe(true);
-    // Must have picked the non-seed candidate, not the higher-scoring seed.
     expect(result.candidate_user_id).toBe('user-real');
+
+    // RPC must have been called with include_seeds=false.
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: false }),
+    });
   });
 
-  it('returns no_candidate when seed_pool_active=false and all candidates are seeds', async () => {
+  it('returns no_candidate when seed_pool_active=false and RPC returns empty (all seeds filtered SQL-side)', async () => {
     dbState.seedPoolActive = false;
-    dbState.candidates = [
-      { candidate_user: 'user-seed-1', score: 0.99, is_seed: true },
-      { candidate_user: 'user-seed-2', score: 0.88, is_seed: true },
-    ];
+    // SQL filter has already excluded seeds; mock returns empty.
+    dbState.candidates = [];
 
     const result = (await handler(makeCtx({ user_id: 'user-aaa', agent_id: 'agent-aaa' }))) as {
       spawned: boolean;
@@ -259,6 +268,13 @@ describe('firstEncounter Inngest fn', () => {
     expect(result.spawned).toBe(false);
     expect(result.reason).toBe('no_candidate');
     expect(stepSendEvent).not.toHaveBeenCalled();
+
+    // Still called the RPC with include_seeds=false.
+    expect(dbState.rpcCalls).toHaveLength(1);
+    expect(dbState.rpcCalls[0]).toMatchObject({
+      fn: 'match_candidates',
+      args: expect.objectContaining({ include_seeds: false }),
+    });
   });
 
   it('inserts wont_connect outcome and returns early when daily quota is exceeded', async () => {

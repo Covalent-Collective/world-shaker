@@ -126,7 +126,7 @@ export function SafetyMenu({ surfaceContext, open, onOpenChange }: Props) {
                 onClick={handleBlock}
                 disabled={submitting}
               >
-                {t('safety.block')}
+                {t('safety.hide_and_report')}
               </Button>
             </div>
             <DrawerFooter>

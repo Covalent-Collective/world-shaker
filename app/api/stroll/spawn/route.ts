@@ -97,8 +97,6 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Read seed pool flag; default true (seeds included) if row missing.
-  // v1 follow-up: extend match_candidates RPC to accept include_seeds boolean
-  // for SQL-level filtering instead of this client-side filter.
   const seedPoolActive = settingsRow?.seed_pool_active ?? true;
 
   // 3. Defense-in-depth: verify candidate is in match_candidates results
@@ -106,13 +104,10 @@ export async function POST(req: Request): Promise<Response> {
     target_user: worldUserId,
     k: 10,
     mode: 'stroll_proactive',
+    include_seeds: seedPoolActive,
   });
 
-  const rawCandidateList = Array.isArray(candidates) ? candidates : [];
-  // Filter out seed agents when the seed pool flag is disabled.
-  const candidateList = seedPoolActive
-    ? rawCandidateList
-    : rawCandidateList.filter((c: { candidate_user: string; is_seed?: boolean }) => !c.is_seed);
+  const candidateList = Array.isArray(candidates) ? candidates : [];
 
   const isValidCandidate = candidateList.some(
     (c: { candidate_user: string }) => c.candidate_user === candidate_user_id,

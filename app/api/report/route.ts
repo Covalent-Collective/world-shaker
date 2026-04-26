@@ -142,7 +142,10 @@ export async function POST(req: Request) {
     user_id: claims.world_user_id,
     event_type: 'report_filed',
     source_screen: 'safety_menu',
-    metadata: { reported_user_id, reason },
+    // Set top-level match_id when available (indexed column); conversation_id
+    // has no top-level column on outcome_events so it stays in metadata only.
+    ...(match_id ? { match_id } : {}),
+    metadata: { reported_user_id, reason, ...(conversation_id ? { conversation_id } : {}) },
   });
   if (eventError) {
     console.error('[report] outcome_events insert failed:', eventError);

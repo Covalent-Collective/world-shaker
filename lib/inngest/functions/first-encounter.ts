@@ -65,9 +65,7 @@ export const firstEncounter = inngest.createFunction(
     const candidate = await step.run('pick-candidate', async () => {
       const supabase = getServiceClient();
 
-      // Read seed_pool_active flag once per request.
-      // v1 follow-up: extend match_candidates RPC to accept include_seeds boolean
-      // for SQL-level filtering instead of this client-side filter.
+      // Read seed_pool_active flag; passed to RPC for SQL-level filtering.
       const { data: settingsRow } = await supabase
         .from('app_settings')
         .select('seed_pool_active')
@@ -79,20 +77,16 @@ export const firstEncounter = inngest.createFunction(
         target_user: user_id,
         k: 10,
         mode: 'system_generated',
+        include_seeds: seedPoolActive,
       });
       if (error) {
         throw new Error(`match_candidates rpc error: ${error.message}`);
       }
-      let rows = (data ?? []) as Array<{
+      const rows = (data ?? []) as Array<{
         candidate_user: string;
         score: number;
         is_seed?: boolean;
       }>;
-
-      // Filter out seed agents when the seed pool is disabled.
-      if (!seedPoolActive) {
-        rows = rows.filter((r) => !r.is_seed);
-      }
 
       const top = rows[0];
       if (!top) return null;

@@ -196,6 +196,8 @@ describe('POST /api/stroll/spawn', () => {
         error: null,
       });
 
+    // Capture RPC args for include_seeds assertion below.
+
     // from() call order:
     //  1. app_settings (select streaming_paused)
     //  2. agents (select id — own agent)
@@ -236,6 +238,12 @@ describe('POST /api/stroll/spawn', () => {
         event_type: 'viewed',
         source_screen: 'stroll',
       }),
+    );
+
+    // RPC was called with include_seeds=true (seed_pool_active defaults true).
+    expect(mockRpc).toHaveBeenCalledWith(
+      'match_candidates',
+      expect.objectContaining({ include_seeds: true }),
     );
   });
 
@@ -348,7 +356,7 @@ describe('POST /api/stroll/spawn', () => {
 
   // ── seed_pool_active=false: seed candidates filtered out ─────────────────
 
-  it('returns 404 candidate_not_found when seed_pool_active=false and candidate is a seed', async () => {
+  it('returns 404 candidate_not_found when seed_pool_active=false and RPC returns no matching candidate', async () => {
     mockVerifyWorldUserJwt.mockResolvedValue(DEFAULT_CLAIMS);
     mockRateLimit.mockResolvedValue({ ok: true, retryAfterSeconds: 0, remaining: 9 });
     mockGetDailyQuota.mockResolvedValue({ used: 1, max: 4, nextResetAt: new Date() });
@@ -359,9 +367,9 @@ describe('POST /api/stroll/spawn', () => {
       error: null,
     });
 
-    // match_candidates returns only a seed candidate
+    // SQL-level filter already excluded seeds; RPC returns empty list.
     mockRpc.mockResolvedValueOnce({
-      data: [{ candidate_user: CANDIDATE_USER_ID, score: 0.95, is_seed: true }],
+      data: [],
       error: null,
     });
 
@@ -373,6 +381,12 @@ describe('POST /api/stroll/spawn', () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe('candidate_not_found');
+
+    // RPC must have been called with include_seeds=false.
+    expect(mockRpc).toHaveBeenCalledWith(
+      'match_candidates',
+      expect.objectContaining({ include_seeds: false }),
+    );
   });
 
   it('returns 200 when seed_pool_active=false and candidate is a non-seed real user', async () => {
@@ -383,7 +397,7 @@ describe('POST /api/stroll/spawn', () => {
     mockGetDailyQuota.mockResolvedValue({ used: 1, max: 4, nextResetAt: new Date() });
     mockInngestSend.mockResolvedValue(undefined);
 
-    // seed_pool_active=false but candidate is NOT a seed
+    // seed_pool_active=false; RPC returns only non-seed (SQL filter applied).
     const settingsChain = buildChain({
       data: { streaming_paused: false, seed_pool_active: false },
       error: null,
@@ -414,5 +428,11 @@ describe('POST /api/stroll/spawn', () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.conversation_id).toBe(SYNTHETIC_CONVERSATION_ID);
+
+    // RPC was called with include_seeds=false.
+    expect(mockRpc).toHaveBeenCalledWith(
+      'match_candidates',
+      expect.objectContaining({ include_seeds: false }),
+    );
   });
 });

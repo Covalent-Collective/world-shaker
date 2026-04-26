@@ -106,11 +106,11 @@ describe('SafetyMenu', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders Report and Block buttons when open', () => {
+  it('renders Report and Hide-and-report buttons when open', () => {
     renderMenu();
     const reportEls = screen.getAllByText('safety.report');
     expect(reportEls.length).toBeGreaterThan(0);
-    expect(screen.getByText('safety.block')).toBeInTheDocument();
+    expect(screen.getByText('safety.hide_and_report')).toBeInTheDocument();
   });
 
   it('does not render when open=false', () => {
@@ -188,11 +188,11 @@ describe('SafetyMenu', () => {
     expect(fetchSpy.calls[0]?.body).not.toHaveProperty('reported_user_id');
   });
 
-  it('Block button POSTs match_id and reason=spam (no reported_user_id)', async () => {
+  it('Hide-and-report button POSTs match_id and reason=spam (no reported_user_id)', async () => {
     const user = userEvent.setup();
     renderMenu({ surfaceContext: { match_id: 'block-match-id' } });
 
-    await user.click(screen.getByText('safety.block'));
+    await user.click(screen.getByText('safety.hide_and_report'));
 
     await waitFor(() => {
       expect(fetchSpy.calls.length).toBe(1);
