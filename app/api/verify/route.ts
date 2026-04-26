@@ -39,8 +39,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
     }
 
+    console.log('[verify] incoming payload', {
+      verification_level: body.data.verification_level,
+      has_proof: typeof body.data.proof === 'string' && body.data.proof.length > 0,
+      has_merkle_root: typeof body.data.merkle_root === 'string',
+      has_nullifier_hash: typeof body.data.nullifier_hash === 'string',
+    });
+
     const result = await verifyWithDevPortal(body.data);
     if (!result.ok) {
+      console.error('[verify] failed', result.error);
       return NextResponse.json({ error: 'verify_failed', detail: result.error }, { status: 400 });
     }
 

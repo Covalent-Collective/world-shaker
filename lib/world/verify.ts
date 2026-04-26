@@ -90,6 +90,17 @@ export async function verifyWithDevPortal(
       },
     ],
   };
+  console.log(
+    '[verify] forward to dev portal',
+    JSON.stringify({
+      url,
+      action: body.action,
+      environment: body.environment,
+      protocol_version: body.protocol_version,
+      response_count: body.responses.length,
+      identifier: body.responses[0]?.identifier,
+    }),
+  );
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -98,7 +109,8 @@ export async function verifyWithDevPortal(
     });
     if (!res.ok) {
       const text = await res.text();
-      return { ok: false, error: `dev_portal_${res.status}_${text.slice(0, 100)}` };
+      console.error('[verify] dev portal non-2xx', res.status, text);
+      return { ok: false, error: `dev_portal_${res.status}_${text.slice(0, 500)}` };
     }
     // v2 success response is flat: { success, action, nullifier_hash,
     // verification_level, created_at }.
@@ -108,6 +120,8 @@ export async function verifyWithDevPortal(
       nullifier_hash?: string;
       verification_level?: string;
     };
+
+    console.log('[verify] dev portal success', JSON.stringify(data).slice(0, 600));
 
     if (!data.success || typeof data.nullifier_hash !== 'string') {
       return { ok: false, error: 'dev_portal_rejected' };
