@@ -16,6 +16,11 @@ export interface SkeletonQuestion {
 }
 
 export const SKELETON_QUESTIONS: readonly SkeletonQuestion[] = [
+  // q0_name is asked FIRST so every downstream prompt + UI plate has a real
+  // name to use (e.g. "bigJY" in the dialogue body and on the speaker tag).
+  // The answer is stored verbatim under interview_answers.q0_name and read
+  // back in live-conversation.ts to seed PersonaProfile.name.
+  { id: 'q0_name', i18nKey: 'interview.skeleton.q0_name' },
   { id: 'q1_laugh', i18nKey: 'interview.skeleton.q1' },
   { id: 'q2_surprised', i18nKey: 'interview.skeleton.q2' },
   { id: 'q3_working_through', i18nKey: 'interview.skeleton.q3' },
