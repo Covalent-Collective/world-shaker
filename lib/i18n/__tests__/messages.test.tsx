@@ -144,8 +144,8 @@ describe('useT', () => {
     expect(result.current('badge.verified_human')).toBe('Verified Human');
   });
 
-  it('defaults to ko without a provider', () => {
+  it('defaults to en without a provider (English is product default)', () => {
     const { result } = renderHook(() => useT());
-    expect(result.current('common.cancel')).toBe('취소');
+    expect(result.current('common.cancel')).toBe('Cancel');
   });
 });

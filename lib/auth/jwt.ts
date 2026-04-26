@@ -32,7 +32,8 @@ export interface WorldShakerClaims {
   nullifier: string;
   /**
    * User's preferred language, derived from Accept-Language header at verify
-   * time. Always populated — defaults to 'ko' when claim is absent.
+   * time. Always populated — defaults to 'en' when claim is absent
+   * (English is the product's default for global reach).
    */
   language_pref: 'ko' | 'en';
 }
@@ -43,14 +44,15 @@ export interface WorldShakerClaims {
  * Rules (case-insensitive, first tag only):
  * - Starts with 'ko' → 'ko'
  * - Starts with 'en' → 'en'
- * - null, '', or any other value → 'ko' (default)
+ * - null, '', or any other value → 'en' (default — English is the product
+ *   default for unknown/unsupported locales).
  */
 export function parseLanguagePref(acceptLanguage: string | null): 'ko' | 'en' {
-  if (!acceptLanguage) return 'ko';
+  if (!acceptLanguage) return 'en';
   const lower = acceptLanguage.trimStart().toLowerCase();
   if (lower.startsWith('ko')) return 'ko';
   if (lower.startsWith('en')) return 'en';
-  return 'ko';
+  return 'en';
 }
 
 export async function signWorldUserJwt(
@@ -80,7 +82,7 @@ export async function verifyWorldUserJwt(token: string): Promise<WorldShakerClai
     throw new Error('jwt_missing_claims');
   }
   const lang: 'ko' | 'en' =
-    payload.language_pref === 'ko' || payload.language_pref === 'en' ? payload.language_pref : 'ko';
+    payload.language_pref === 'ko' || payload.language_pref === 'en' ? payload.language_pref : 'en';
   const claims: WorldShakerClaims = {
     world_user_id: payload.world_user_id,
     nullifier: payload.nullifier,
