@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
 import type { ISuccessResult } from '@worldcoin/minikit-js';
@@ -9,37 +9,62 @@ import { useT } from '@/lib/i18n/useT';
 import { posthog } from '@/lib/posthog/client';
 import VerifiedHumanBadge from '@/components/world/VerifiedHumanBadge';
 
+interface DebugState {
+  clicks: number;
+  installed: boolean | null;
+  lastStep: string;
+  lastError: string;
+}
+
 export default function VerifyPage(): React.ReactElement {
   const t = useT();
   const router = useRouter();
   const [verified, setVerified] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [dbg, setDbg] = useState<DebugState>({
+    clicks: 0,
+    installed: null,
+    lastStep: 'idle',
+    lastError: '',
+  });
+
+  useEffect(() => {
+    // SSR-safe one-shot probe of the MiniKit injection state. Debug pane only.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDbg((s) => ({ ...s, installed: MiniKit.isInstalled() }));
+  }, []);
 
   const handleVerify = async (): Promise<void> => {
+    setDbg((s) => ({ ...s, clicks: s.clicks + 1, lastStep: 'click', lastError: '' }));
     setBusy(true);
     try {
-      if (!MiniKit.isInstalled()) {
-        posthog.capture('verify_error', { reason: 'not_in_world_app' });
-        toast.error(t('verify.error_toast'));
+      const installed = MiniKit.isInstalled();
+      setDbg((s) => ({ ...s, installed, lastStep: 'isInstalled-checked' }));
+      if (!installed) {
+        toast.error('Not in World App');
         return;
       }
 
       const action = process.env.NEXT_PUBLIC_WORLD_ACTION as string;
+      setDbg((s) => ({ ...s, lastStep: `calling-verify(${action})` }));
       const { finalPayload } = await MiniKit.commandsAsync.verify({
         action,
         verification_level: VerificationLevel.Orb,
       });
+      setDbg((s) => ({
+        ...s,
+        lastStep: `payload-status-${finalPayload.status}`,
+      }));
 
       if (finalPayload.status === 'error') {
-        posthog.capture('verify_error', {
-          reason: 'minikit_error',
-          code: finalPayload.error_code,
-        });
-        // DEBUG: surface MiniKit error code on screen.
-        toast.error(`MiniKit: ${finalPayload.error_code ?? 'unknown'}`);
+        const code = (finalPayload as { error_code?: string }).error_code ?? 'unknown';
+        setDbg((s) => ({ ...s, lastError: `MiniKit:${code}` }));
+        posthog.capture('verify_error', { reason: 'minikit_error', code });
+        toast.error(`MiniKit: ${code}`);
         return;
       }
 
+      setDbg((s) => ({ ...s, lastStep: 'fetching-/api/verify' }));
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,31 +73,35 @@ export default function VerifyPage(): React.ReactElement {
 
       if (res.ok) {
         setVerified(true);
+        setDbg((s) => ({ ...s, lastStep: 'success-redirect' }));
         posthog.capture('verify_success');
         router.push('/intro');
       } else {
-        posthog.capture('verify_error', { reason: 'non_200', status: res.status });
-        // DEBUG: surface server error detail on screen.
         let detail = `${res.status}`;
         try {
           const json = (await res.json()) as { error?: string; detail?: string };
           detail = `${json.error ?? res.status}: ${json.detail ?? ''}`.slice(0, 240);
         } catch {
-          // ignore JSON parse failure; status code already in detail
+          // ignore
         }
+        setDbg((s) => ({ ...s, lastError: `Server:${detail}` }));
+        posthog.capture('verify_error', { reason: 'non_200', status: res.status });
         toast.error(`Server: ${detail}`);
       }
-    } catch {
-      posthog.capture('verify_error', { reason: 'network' });
-      toast.error(t('verify.error_toast'));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDbg((s) => ({ ...s, lastError: `throw:${msg}` }));
+      posthog.capture('verify_error', { reason: 'thrown', message: msg });
+      toast.error(`Threw: ${msg.slice(0, 200)}`);
     } finally {
       setBusy(false);
+      setDbg((s) => ({ ...s, lastStep: `done (busy=false)` }));
     }
   };
 
   return (
     <main className="min-h-dvh flex items-center justify-center p-6">
-      <div className="max-w-sm w-full text-center space-y-8">
+      <div className="max-w-sm w-full text-center space-y-6">
         <div className="space-y-3">
           <h1 className="font-serif text-3xl leading-tight">{t('verify.title')}</h1>
           <p className="text-text-2 text-sm">{t('verify.subtitle')}</p>
@@ -90,6 +119,15 @@ export default function VerifyPage(): React.ReactElement {
         >
           {t('verify.cta')}
         </button>
+
+        {/* DEBUG pane — remove once verify is stable. */}
+        <pre className="text-[10px] text-left text-text-2 bg-black/40 rounded-md p-3 leading-tight whitespace-pre-wrap break-all">
+          {`clicks: ${dbg.clicks}
+installed: ${dbg.installed === null ? '?' : dbg.installed}
+busy: ${busy}
+step: ${dbg.lastStep}
+err: ${dbg.lastError || '-'}`}
+        </pre>
       </div>
     </main>
   );
