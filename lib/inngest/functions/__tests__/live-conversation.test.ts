@@ -40,6 +40,7 @@ vi.mock('@/lib/llm/prompts/agent-dialogue', () => ({
 //   .from('agents').select(...).in(...) -> returns rows
 //   .from('outcome_events').insert(payload) -> records call
 //   .from('conversations').update({...}).eq(...).eq(...).select('id') -> rows
+//   .from('conversations').select(...).eq('id', X).maybeSingle() -> conversationLookup row
 //   .rpc('allocate_conversation_attempt', ...) -> id
 //   .rpc('append_turn_with_ledger', ...) -> bool
 function makeSupabaseMock(opts: {
@@ -50,6 +51,15 @@ function makeSupabaseMock(opts: {
   // row), false = "terminated externally" (returns 0 rows). Defaults to
   // true when the array runs out.
   heartbeatStillLive: () => boolean[];
+  // When set, .from('conversations').select(...).eq('id', X).maybeSingle()
+  // returns this row (or null). Used for the pre-allocated conversation_id path.
+  conversationLookup?: {
+    id: string;
+    surface: string;
+    agent_a_id: string;
+    agent_b_id: string;
+    status: string;
+  } | null;
 }) {
   const insertCalls: Array<{ table: string; payload: unknown }> = [];
   const updateCalls: Array<{ table: string; payload: Record<string, unknown> }> = [];
@@ -88,6 +98,18 @@ function makeSupabaseMock(opts: {
       }
       if (table === 'conversations') {
         return {
+          select: vi.fn(() => {
+            // Fluent chain for: .select(...).eq('id', X).maybeSingle()
+            // Used by the pre-allocated conversation_id lookup path.
+            const eqChain = {
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn(() =>
+                  Promise.resolve({ data: opts.conversationLookup ?? null, error: null }),
+                ),
+              })),
+            };
+            return eqChain;
+          }),
           update: vi.fn((payload: Record<string, unknown>) => {
             updateCalls.push({ table: 'conversations', payload });
             // Determine: is this a heartbeat (.select('id') chain) or a status update?
@@ -620,5 +642,59 @@ describe('liveConversation Inngest fn', () => {
     // The failed event reason contains cost_cap_exceeded.
     const failedEvent = sentEvents.find((e) => e.payload.name === 'conversation.failed');
     expect((failedEvent?.payload.data as { reason: string }).reason).toContain('cost_cap_exceeded');
+  });
+
+  it('adopts pre-allocated conversation_id when payload supplies it -> no allocate RPC call', async () => {
+    const { assertBudgetAvailable } = await import('@/lib/llm/budget');
+    (assertBudgetAvailable as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    const { streamChat } = await import('@/lib/llm/openrouter');
+    (streamChat as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      streamingChatYielding('Hello pre-allocated.'),
+    );
+
+    const safety = await import('@/lib/llm/safety');
+    (safety.detectRepeatLoop as unknown as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (safety.detectHostileTone as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+    (safety.detectNSFW as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      flagged: false,
+      reason: 'clean',
+    });
+
+    const supa = makeSupabaseMock({
+      agents: baseAgents,
+      rpcAllocate: () => {
+        throw new Error('allocate_conversation_attempt must NOT be called when id is pre-supplied');
+      },
+      rpcAppend: () => true,
+      heartbeatStillLive: () => Array(10).fill(true),
+      conversationLookup: {
+        id: 'preallocated-id',
+        surface: 'dating',
+        agent_a_id: 'agent-a',
+        agent_b_id: 'agent-b',
+        status: 'live',
+      },
+    });
+
+    const { result } = await runFn({
+      supa,
+      eventOverrides: {
+        conversation_id: 'preallocated-id',
+      } as typeof baseEvent.data & { conversation_id?: string },
+    });
+
+    // Adopted the pre-supplied id and completed successfully.
+    expect((result as { status: string }).status).toBe('completed');
+    expect((result as { conversation_id?: string }).conversation_id).toBe('preallocated-id');
+
+    // allocate_conversation_attempt must NOT have been called.
+    const allocateCalls = (
+      supa.supabase.rpc as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[0] === 'allocate_conversation_attempt');
+    expect(allocateCalls).toHaveLength(0);
   });
 });

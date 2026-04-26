@@ -18,8 +18,12 @@ import type { StreamChatMessage } from '@/lib/llm/openrouter';
  *
  * Flow:
  *   1. Pre-flight: assertBudgetAvailable. If not ok -> wont_connect outcome + bail.
- *   2. Allocate attempt via allocate_conversation_attempt RPC (advisory lock
- *      serializes concurrent restart attempts).
+ *   2. Adopt or allocate conversation attempt: if payload.conversation_id
+ *      is supplied (e.g. by /api/stroll/spawn pre-allocating to return a
+ *      synchronous id), validate the row exists with matching surface +
+ *      agent_a_id/agent_b_id + status='live' and adopt it; otherwise call
+ *      allocate_conversation_attempt RPC (advisory lock serializes
+ *      concurrent restart attempts).
  *   3. Load both agents and build per-side persona prompts.
  *   4. For each turn 0..MAX_TURNS-1:
  *        a. stage = opening (0..3) | probing (4..15) | landing (16..)
@@ -54,6 +58,15 @@ export type ConversationStartPayload = {
   pair_key?: string;
   language: Lang;
   max_turns?: number;
+  /** Set to true when this conversation was spawned by the first-encounter pipeline.
+   *  Forwarded to conversation.completed so generate-report can stamp the match row. */
+  is_first_encounter?: boolean;
+  /**
+   * If the caller pre-allocated the conversation row (e.g. stroll/spawn route),
+   * supply the UUID here. When present, the allocate-attempt step is skipped and
+   * this id is used directly — avoiding a duplicate allocation attempt.
+   */
+  conversation_id?: string;
 };
 
 interface AgentRow {
@@ -102,7 +115,7 @@ export const liveConversation = inngest.createFunction(
   },
   async ({ event, step, logger }) => {
     const payload = event.data as ConversationStartPayload;
-    const { user_id, surface, agent_a_id, agent_b_id, language } = payload;
+    const { user_id, surface, agent_a_id, agent_b_id, language, is_first_encounter } = payload;
     const maxTurns = Math.min(payload.max_turns ?? DEFAULT_MAX_TURNS, DEFAULT_MAX_TURNS);
 
     // Canonical pair_key: computed internally so callers cannot inject an
@@ -130,8 +143,40 @@ export const liveConversation = inngest.createFunction(
       return { aborted: true, reason: preflight.reason ?? 'unknown' };
     }
 
-    // ---- Step 2: allocate conversation attempt ----------------------------
+    // ---- Step 2: allocate or adopt conversation attempt -------------------
+    // If the caller (e.g. /api/stroll/spawn) pre-allocated a conversation row
+    // and supplied its id, validate and adopt it. Otherwise allocate a new
+    // attempt via the advisory-locked RPC.
     const conversation_id = await step.run('allocate-attempt', async () => {
+      if (payload.conversation_id) {
+        const { data: row, error: lookupErr } = await supabase
+          .from('conversations')
+          .select('id, surface, agent_a_id, agent_b_id, status')
+          .eq('id', payload.conversation_id)
+          .maybeSingle();
+        if (lookupErr) {
+          throw new Error(`pre-allocated conversation lookup failed: ${lookupErr.message}`);
+        }
+        if (!row) {
+          throw new Error(`pre-allocated conversation_id ${payload.conversation_id} not found`);
+        }
+        if (
+          row.surface !== surface ||
+          row.agent_a_id !== agent_a_id ||
+          row.agent_b_id !== agent_b_id
+        ) {
+          throw new Error(
+            `pre-allocated conversation ${payload.conversation_id} mismatched surface/agent ids`,
+          );
+        }
+        if (row.status !== 'live') {
+          throw new Error(
+            `pre-allocated conversation ${payload.conversation_id} not in live status (got ${row.status})`,
+          );
+        }
+        return row.id as string;
+      }
+
       const { data, error } = await supabase.rpc('allocate_conversation_attempt', {
         p_surface: surface,
         p_pair_key: pair_key,
@@ -332,7 +377,7 @@ export const liveConversation = inngest.createFunction(
 
     await step.sendEvent('emit-conversation-completed', {
       name: CONVERSATION_COMPLETED_EVENT,
-      data: { conversation_id },
+      data: { conversation_id, is_first_encounter: is_first_encounter ?? false },
     });
 
     return { conversation_id, status: 'completed', turns: maxTurns };

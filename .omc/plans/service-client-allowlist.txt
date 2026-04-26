@@ -11,7 +11,9 @@ app/api/inngest/route.ts
 app/api/verify/route.ts
 app/api/wallet-auth/route.ts
 app/api/conversation/[id]/stream/route.ts
+app/api/conversation/[id]/restart/route.ts
 app/api/user/language/route.ts
+app/api/first-encounter/recover/route.ts
 scripts/calibrate-match-weights.ts
 scripts/validate-hnsw-recall.ts
 scripts/smoke-conversation.ts
@@ -20,3 +22,13 @@ lib/quota/daily.ts
 lib/llm/safety.ts
 lib/llm/budget.ts
 app/api/conversation/[id]/abandon/route.ts
+lib/avatar/generate.ts
+app/api/match/[id]/like/route.ts
+app/api/stroll/spawn/route.ts
+app/(app)/stroll/page.tsx
+app/(app)/conversation/[id]/page.tsx
+app/api/agent/answer/route.ts
+app/api/agent/activate/route.ts
+app/(app)/match/[id]/success/page.tsx
+app/(app)/match/[id]/page.tsx
+app/page.tsx

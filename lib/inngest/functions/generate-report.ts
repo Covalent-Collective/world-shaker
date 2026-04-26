@@ -51,7 +51,10 @@ export const generateReport = inngest.createFunction(
     triggers: [{ event: 'conversation.completed' }],
   },
   async ({ event, step, logger }) => {
-    const { conversation_id } = event.data as { conversation_id: string };
+    const { conversation_id, is_first_encounter } = event.data as {
+      conversation_id: string;
+      is_first_encounter?: boolean;
+    };
     const supabase = getServiceClient();
 
     // Step 1: Load conversation row (must be completed, have both agents + surface)
@@ -251,7 +254,7 @@ export const generateReport = inngest.createFunction(
         status: 'pending',
         origin: 'system_generated',
         starters,
-        first_encounter: true,
+        first_encounter: is_first_encounter ?? false,
         created_at: now,
         accepted_at: null,
         expires_at: expiresAt,
