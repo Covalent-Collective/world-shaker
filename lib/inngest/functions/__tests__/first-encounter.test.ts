@@ -26,6 +26,11 @@ vi.mock('@/lib/inngest/client', () => ({
 vi.mock('@/lib/avatar/generate', () => ({ generateAvatar }));
 vi.mock('@/lib/quota/daily', () => ({ getDailyQuota }));
 
+// PostHog cohort mock — hashCohort needs no real DB in unit tests
+vi.mock('@/lib/posthog/cohort', () => ({
+  hashCohort: (id: string) => Promise.resolve(`hashed:${id}`),
+}));
+
 // ---------------------------------------------------------------------------
 // Supabase service-client mock.
 // ---------------------------------------------------------------------------

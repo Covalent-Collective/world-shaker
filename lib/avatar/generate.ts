@@ -136,12 +136,32 @@ export async function generateAvatar(input: GenerateAvatarInput): Promise<Genera
   }
 
   // Persist the URL to the agents row.
-  const { error } = await db
+  // The .is('avatar_generated_at', null) predicate makes this atomic:
+  // only the first concurrent caller wins; subsequent callers get 0 rows updated
+  // and fall through to re-select the winner's URL (US-501 one-shot policy).
+  const now = new Date().toISOString();
+  const { data: updated, error } = await db
     .from('agents')
-    .update({ avatar_url: url, avatar_generated_at: new Date().toISOString() })
-    .eq('id', agent_id);
+    .update({ avatar_url: url, avatar_generated_at: now })
+    .eq('id', agent_id)
+    .is('avatar_generated_at', null)
+    .select('avatar_url, avatar_generated_at');
 
   if (error) throw new Error(`avatar_db_update_error: ${error.message}`);
+
+  if (updated && updated.length === 0) {
+    // Lost the race — another concurrent call already wrote the avatar.
+    // Re-select and return the winning URL.
+    const { data: row, error: reSelectError } = await db
+      .from('agents')
+      .select('avatar_url')
+      .eq('id', agent_id)
+      .single();
+    if (reSelectError) throw new Error(`avatar_db_reselect_error: ${reSelectError.message}`);
+    const existingUrl = row.avatar_url as string;
+    const isPlaceholder = existingUrl.startsWith('/avatars/placeholder/');
+    return { url: existingUrl, placeholder: isPlaceholder };
+  }
 
   return { url, placeholder };
 }

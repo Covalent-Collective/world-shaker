@@ -1,6 +1,6 @@
 # PostHog Events Coverage Report (AC-19)
 
-> Generated: 2026-04-26T04:26:40.696Z
+> Generated: 2026-04-26T04:39:18.938Z
 > Script: `scripts/audit-posthog-events.ts`
 
 ## Summary
@@ -15,13 +15,13 @@
 | ------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------- |
 | `interview_started` ⚠                 | 0              | —                                                                                                  |
 | `interview_completed` ⚠               | 0              | —                                                                                                  |
-| `first_encounter_spawned`             | 1              | `lib/inngest/functions/first-encounter.ts:166`                                                     |
+| `first_encounter_spawned`             | 1              | `lib/inngest/functions/first-encounter.ts:169`                                                     |
 | `conversation_streaming_started`      | 1              | `lib/inngest/functions/live-conversation.ts:202`                                                   |
 | `conversation_completed`              | 1              | `lib/inngest/functions/live-conversation.ts:433`                                                   |
 | `report_viewed` ⚠                     | 0              | —                                                                                                  |
 | `report_expanded` ⚠                   | 0              | —                                                                                                  |
-| `like_sent`                           | 1              | `app/api/match/[id]/like/route.ts:91`                                                              |
-| `mutual_match`                        | 2              | `app/api/match/[id]/like/route.ts:138`, `lib/inngest/functions/mutual-push.ts:41`                  |
+| `like_sent`                           | 1              | `app/api/match/[id]/like/route.ts:93`                                                              |
+| `mutual_match`                        | 1              | `app/api/match/[id]/like/route.ts:141`                                                             |
 | `world_chat_opened` ⚠                 | 0              | —                                                                                                  |
 | `quota_blocked`                       | 1              | `app/api/stroll/spawn/route.ts:83`                                                                 |
 | `conversation_failed_overlay_shown` ⚠ | 0              | —                                                                                                  |

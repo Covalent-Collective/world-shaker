@@ -44,8 +44,17 @@ function setupDbSuccess(
   mockSelectEq.mockReturnValue({ single: mockSelectSingle });
   mockSelect.mockReturnValue({ eq: mockSelectEq });
 
-  // UPDATE chain: from('agents').update(...).eq(...)
-  mockUpdateEq.mockResolvedValue({ error: null });
+  // UPDATE chain: from('agents').update(...).eq(...).is(...).select(...)
+  // The .is() + .select() chain resolves to { data: [...], error: null }
+  // representing one row updated (winner of atomic predicate check).
+  mockUpdateEq.mockReturnValue({
+    is: vi.fn().mockReturnValue({
+      select: vi.fn().mockResolvedValue({
+        data: [{ avatar_url: 'placeholder', avatar_generated_at: new Date().toISOString() }],
+        error: null,
+      }),
+    }),
+  });
   mockUpdate.mockReturnValue({ eq: mockUpdateEq });
 
   // from() returns an object exposing both select and update
@@ -59,8 +68,12 @@ function setupDbError(message: string): void {
   mockSelectEq.mockReturnValue({ single: mockSelectSingle });
   mockSelect.mockReturnValue({ eq: mockSelectEq });
 
-  // UPDATE returns an error
-  mockUpdateEq.mockResolvedValue({ error: { message } });
+  // UPDATE chain: .eq().is().select() → error
+  mockUpdateEq.mockReturnValue({
+    is: vi.fn().mockReturnValue({
+      select: vi.fn().mockResolvedValue({ data: null, error: { message } }),
+    }),
+  });
   mockUpdate.mockReturnValue({ eq: mockUpdateEq });
 
   mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate });

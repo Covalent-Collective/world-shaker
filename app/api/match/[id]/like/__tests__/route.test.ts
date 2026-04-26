@@ -31,6 +31,11 @@ vi.mock('@/lib/inngest/client', () => ({
   inngest: { send: (...args: unknown[]) => mockInngestSend(...args) },
 }));
 
+// PostHog cohort mock — hashCohort needs no real DB in unit tests
+vi.mock('@/lib/posthog/cohort', () => ({
+  hashCohort: (id: string) => Promise.resolve(`hashed:${id}`),
+}));
+
 // ---------------------------------------------------------------------------
 // Import route handler AFTER mocks
 // ---------------------------------------------------------------------------

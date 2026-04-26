@@ -77,22 +77,33 @@ interface EmissionResult {
 
 /**
  * Run git grep for a given PostHog event name.
- * Searches for the literal event string inside captureServer / posthog.capture
- * call sites.  Using a broad pattern ('event_name') catches both single and
- * double quoted occurrences.
+ * Searches only for actual capture call sites using specific patterns:
+ *   captureServer('<event_name>'
+ *   posthog.capture('<event_name>'
+ *
+ * The audit script itself is excluded from grep targets to prevent the
+ * POSTHOG_EVENTS array from being counted as emission points.
  */
 function findEmissions(eventName: PostHogEvent): string[] {
-  const pattern = `'${eventName}'`;
+  // Match actual server-side or client-side capture invocations only.
+  // Single-quote variant: captureServer('event') or posthog.capture('event')
+  // Double-quote variant: captureServer("event") or posthog.capture("event")
+  const singleQ = `captureServer('${eventName}'\\|posthog\\.capture('${eventName}'`;
+  const doubleQ = `captureServer(\\"${eventName}\\"\\|posthog\\.capture(\\"${eventName}\\"`;
+
+  const auditScript = 'scripts/audit-posthog-events.ts';
 
   let output = '';
   try {
-    output = execSync(`git grep -rn "${pattern}" -- '*.ts' '*.tsx'`, {
-      cwd: PROJECT_ROOT,
-      encoding: 'utf-8',
-    });
+    // Two separate greps (single + double quotes) piped through sort -u to
+    // deduplicate, excluding the audit script itself from results.
+    output = execSync(
+      `{ git grep -rn "${singleQ}" -- '*.ts' '*.tsx' 2>/dev/null; git grep -rn "${doubleQ}" -- '*.ts' '*.tsx' 2>/dev/null; } | grep -v "^${auditScript}:" | sort -u`,
+      { cwd: PROJECT_ROOT, encoding: 'utf-8', shell: '/bin/sh' },
+    );
   } catch (err: unknown) {
     const exitCode = (err as { status?: number }).status;
-    // git grep exits 1 when no matches — treat as empty result.
+    // grep exits 1 when no matches — treat as empty result.
     if (exitCode === 1) return [];
     throw err;
   }

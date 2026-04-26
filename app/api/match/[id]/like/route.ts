@@ -6,6 +6,7 @@ import { verifyWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
 import { inngest } from '@/lib/inngest/client';
 import { captureServer } from '@/lib/posthog/server';
+import { hashCohort } from '@/lib/posthog/cohort';
 
 export const runtime = 'nodejs';
 
@@ -87,10 +88,11 @@ export async function POST(
     return NextResponse.json({ status: 'skipped', mutual: false, match_id: matchId });
   }
 
-  // Emit like_sent on accept decision.
+  // Emit like_sent on accept decision. Hash candidate_user_id to avoid leaking raw UUIDs.
+  const candidateCohortLike = await hashCohort(updatedMatch.candidate_user_id);
   void captureServer('like_sent', {
     worldUserId: world_user_id,
-    properties: { match_id: matchId, candidate_user_id: updatedMatch.candidate_user_id },
+    properties: { match_id: matchId, candidate_cohort: candidateCohortLike },
   });
 
   // ── Accept: check for reciprocal accepted match ───────────────────────────
@@ -134,12 +136,13 @@ export async function POST(
     }
   }
 
-  // Emit mutual_match PostHog event for both sides.
+  // Emit mutual_match PostHog event for both sides. Hash candidate_user_id to avoid leaking raw UUIDs.
+  const candidateCohortMutual = await hashCohort(updatedMatch.candidate_user_id);
   void captureServer('mutual_match', {
     worldUserId: world_user_id,
     properties: {
       match_id: matchId,
-      candidate_user_id: updatedMatch.candidate_user_id,
+      candidate_cohort: candidateCohortMutual,
     },
   });
 
