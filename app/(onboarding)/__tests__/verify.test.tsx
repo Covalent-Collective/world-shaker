@@ -89,7 +89,7 @@ describe('VerifyPage', () => {
     await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
     });
     expect(mockPush).not.toHaveBeenCalled();
   });
@@ -104,7 +104,7 @@ describe('VerifyPage', () => {
     await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
     });
     expect(mockPush).not.toHaveBeenCalled();
   });
@@ -117,7 +117,7 @@ describe('VerifyPage', () => {
     await userEvent.click(screen.getByText('verify.cta'));
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalled();
+      expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
     });
     expect(mockVerify).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
