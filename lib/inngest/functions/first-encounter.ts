@@ -3,6 +3,18 @@ import { getServiceClient } from '@/lib/supabase/service';
 import { generateAvatar } from '@/lib/avatar/generate';
 import { getDailyQuota } from '@/lib/quota/daily';
 import { captureServerSafe } from '@/lib/posthog/server';
+import { embedText } from '@/lib/llm/openrouter';
+
+// Build a single text blob from interview_answers for embedding. Drops the
+// `interview_complete` sentinel and any non-string values; preserves the
+// question key as a label so semantically-similar topics cluster together.
+function composeInterviewText(answers: Record<string, unknown> | null): string {
+  if (!answers) return '';
+  return Object.entries(answers)
+    .filter(([k, v]) => k !== 'interview_complete' && typeof v === 'string' && v.trim().length > 0)
+    .map(([k, v]) => `${k}: ${(v as string).trim()}`)
+    .join('\n\n');
+}
 
 /**
  * First-encounter pipeline.
@@ -61,6 +73,40 @@ export const firstEncounter = inngest.createFunction(
       );
       return { spawned: false, reason: 'daily_quota_exceeded' };
     }
+
+    // ── Step 0.5: ensure target agent has an embedding ──────────────────
+    // match_candidates() requires `target_a.embedding IS NOT NULL`. Without
+    // this step real users get stuck on home Case 4 forever — interview
+    // completes but no embedding is ever written, so the RPC returns 0 rows
+    // and the recovery probe loops on the same failure. Self-heal here so
+    // any newly-activated agent (or any pre-existing agent missing the
+    // vector) gets one before matching is attempted.
+    await step.run('ensure-embedding', async () => {
+      const supabase = getServiceClient();
+      const { data: agent, error } = await supabase
+        .from('agents')
+        .select('embedding, interview_answers')
+        .eq('id', agent_id)
+        .maybeSingle();
+      if (error) throw new Error(`agent lookup error: ${error.message}`);
+      if (!agent) throw new Error(`agent ${agent_id} not found`);
+      if (agent.embedding) return { generated: false };
+
+      const text = composeInterviewText((agent.interview_answers ?? {}) as Record<string, unknown>);
+      if (!text) {
+        // Interview answers are missing or empty — leave embedding null and
+        // let recovery retry once the user actually completes the interview.
+        return { generated: false, reason: 'no_interview_text' };
+      }
+
+      const embedding = await embedText(text);
+      const { error: updateError } = await supabase
+        .from('agents')
+        .update({ embedding })
+        .eq('id', agent_id);
+      if (updateError) throw new Error(`agent embedding update error: ${updateError.message}`);
+      return { generated: true, dim: embedding.length };
+    });
 
     // ── Step 1: pick best candidate ─────────────────────────────────────
     const candidate = await step.run('pick-candidate', async () => {
