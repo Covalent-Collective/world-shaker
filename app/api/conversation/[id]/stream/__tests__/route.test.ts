@@ -171,17 +171,35 @@ async function callRoute(
 // ---------------------------------------------------------------------------
 
 describe('stream route helpers', () => {
-  it('formatTurnEvent emits id + event + data SSE frame', async () => {
+  it('formatTurnEvent emits id + event + data SSE frame with derived speaker', async () => {
     const { formatTurnEvent } = await import('../route');
-    const frame = formatTurnEvent({
-      turn_index: 7,
-      text: 'hello',
-      speaker_agent_id: 'agent-1',
-    });
+    const frame = formatTurnEvent(
+      {
+        turn_index: 7,
+        text: 'hello',
+        speaker_agent_id: 'agent-1',
+      },
+      'agent-1',
+    );
     expect(frame).toContain('id: 7\n');
     expect(frame).toContain('event: turn\n');
     expect(frame).toContain(
-      `data: ${JSON.stringify({ turn_index: 7, text: 'hello', speaker_agent_id: 'agent-1' })}\n\n`,
+      `data: ${JSON.stringify({ turn_index: 7, text: 'hello', speaker: 'A', speaker_agent_id: 'agent-1' })}\n\n`,
+    );
+  });
+
+  it('formatTurnEvent maps non-agent_a speaker to B and strips Agent A:/B: prefix', async () => {
+    const { formatTurnEvent } = await import('../route');
+    const frame = formatTurnEvent(
+      {
+        turn_index: 3,
+        text: 'Agent B: hi there',
+        speaker_agent_id: 'agent-2',
+      },
+      'agent-1',
+    );
+    expect(frame).toContain(
+      `data: ${JSON.stringify({ turn_index: 3, text: 'hi there', speaker: 'B', speaker_agent_id: 'agent-2' })}\n\n`,
     );
   });
 

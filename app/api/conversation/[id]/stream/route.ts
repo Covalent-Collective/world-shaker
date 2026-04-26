@@ -64,9 +64,38 @@ interface ConversationTurnRow {
   speaker_agent_id: string;
 }
 
-/** Build a `id:\nevent: turn\ndata: <JSON>\n\n` SSE frame for a turn. */
-export function formatTurnEvent(turn: ConversationTurnRow): string {
-  return `id: ${turn.turn_index}\n` + `event: turn\n` + `data: ${JSON.stringify(turn)}\n\n`;
+/**
+ * Strip leading speaker prefixes the dialogue model sometimes emits.
+ *
+ * The persona/dialogue prompts label the two agents as "Agent A" / "Agent B"
+ * to keep stage direction unambiguous in the LLM's context. Some models echo
+ * that label as a literal "Agent A: …" / "Agent B: …" prefix in their reply,
+ * which then leaks into stored turn text. We strip it on the way out so the
+ * UI never has to render the prefix and old rows look right too.
+ */
+const SPEAKER_PREFIX_RE = /^\s*Agent\s*[ABab]\s*[:：]\s*/;
+
+export function stripSpeakerPrefix(text: string): string {
+  return text.replace(SPEAKER_PREFIX_RE, '');
+}
+
+/**
+ * Build a `id:\nevent: turn\ndata: <JSON>\n\n` SSE frame for a turn.
+ *
+ * Emits a `speaker: 'A' | 'B'` field derived from the canonical agent_a_id of
+ * the conversation, so the client never has to do its own agent-id → side
+ * mapping. The original `speaker_agent_id` is preserved for any consumer that
+ * still relies on it.
+ */
+export function formatTurnEvent(turn: ConversationTurnRow, agentAId: string): string {
+  const speaker: 'A' | 'B' = turn.speaker_agent_id === agentAId ? 'A' : 'B';
+  const payload = {
+    turn_index: turn.turn_index,
+    text: stripSpeakerPrefix(turn.text),
+    speaker,
+    speaker_agent_id: turn.speaker_agent_id,
+  };
+  return `id: ${turn.turn_index}\n` + `event: turn\n` + `data: ${JSON.stringify(payload)}\n\n`;
 }
 
 /** Build the terminal `event: complete` SSE frame. */
@@ -94,11 +123,11 @@ export async function verifyOwnership(
   supabase: ReturnType<typeof getServiceClient>,
   conversationId: string,
   worldUserId: string,
-): Promise<{ status: string } | null> {
+): Promise<{ status: string; agent_a_id: string } | null> {
   const { data, error } = await supabase
     .from('conversations')
     .select(
-      'status, agent_a:agents!conversations_agent_a_id_fkey(user_id), agent_b:agents!conversations_agent_b_id_fkey(user_id)',
+      'status, agent_a_id, agent_a:agents!conversations_agent_a_id_fkey(user_id), agent_b:agents!conversations_agent_b_id_fkey(user_id)',
     )
     .eq('id', conversationId)
     .maybeSingle();
@@ -112,7 +141,10 @@ export async function verifyOwnership(
   const owner = agentA?.user_id === worldUserId || agentB?.user_id === worldUserId;
   if (!owner) return null;
 
-  return { status: String(data.status ?? '') };
+  return {
+    status: String(data.status ?? ''),
+    agent_a_id: String(data.agent_a_id ?? ''),
+  };
 }
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -139,6 +171,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!ownership) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
+  // Captured so the SSE framing helpers can map speaker_agent_id → 'A' | 'B'
+  // without re-querying per turn.
+  const agentAId = ownership.agent_a_id;
 
   // ---- 3. Initial replay range -----------------------------------------
   // Some webview environments strip the Last-Event-ID header on reconnect.
@@ -224,7 +259,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
           // Steady state: drop turns we already emitted (replay or earlier flush).
           if (row.turn_index <= lastSeen) return;
           lastSeen = row.turn_index;
-          safeEnqueue(formatTurnEvent(row));
+          safeEnqueue(formatTurnEvent(row, agentAId));
         },
       );
 
@@ -262,7 +297,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       }
 
       for (const row of (replayRows ?? []) as ConversationTurnRow[]) {
-        safeEnqueue(formatTurnEvent(row));
+        safeEnqueue(formatTurnEvent(row, agentAId));
         if (row.turn_index > lastSeen) lastSeen = row.turn_index;
       }
 
@@ -273,7 +308,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       for (const row of buffered) {
         if (row.turn_index > lastSeen) {
           lastSeen = row.turn_index;
-          safeEnqueue(formatTurnEvent(row));
+          safeEnqueue(formatTurnEvent(row, agentAId));
         }
       }
       buffered.length = 0;
