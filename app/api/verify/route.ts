@@ -8,8 +8,7 @@ import { signWorldUserJwt, SESSION_COOKIE, parseLanguagePref } from '@/lib/auth/
 export const runtime = 'nodejs';
 
 // MiniKit `verify` finalPayload (ISuccessResult) — flat shape forwarded
-// verbatim to Dev Portal v2 verify endpoint along with a server-injected
-// `action`.
+// to Dev Portal v2 along with a server-injected `action`.
 const Body = z.object({
   proof: z.string(),
   merkle_root: z.string(),
@@ -20,17 +19,17 @@ const Body = z.object({
 /**
  * POST /api/verify
  *
- * Receives the IDKit proof payload, forwards to Developer Portal v4 verify
- * (with action/environment/orb checks enforced in lib/world/verify.ts),
- * then upserts the user with UNIQUE (nullifier, action) to guarantee
- * one-human-one-account.
+ * Receives the MiniKit proof payload, forwards to Developer Portal v2 verify
+ * (with action/level checks enforced in lib/world/verify.ts), then upserts
+ * the user with UNIQUE (nullifier, action) to guarantee one-human-one-account.
  *
  * On success, issues a Supabase-compatible JWT and sets it as the
  * `ws_session` cookie. RLS policies read its `world_user_id` claim via
  * public.current_world_user_id().
  *
- * Codex MEDIUM-3: lookup is scoped by both nullifier AND action; the
- * select-then-insert race is handled via 23505 (unique violation) catch.
+ * Lookup is scoped by both nullifier AND action so the same human verifying
+ * for a different action cannot collide; the select-then-insert race is
+ * handled via 23505 (unique violation) catch.
  */
 export async function POST(req: Request) {
   try {
@@ -38,13 +37,6 @@ export async function POST(req: Request) {
     if (!body.success) {
       return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
     }
-
-    console.log('[verify] incoming payload', {
-      verification_level: body.data.verification_level,
-      has_proof: typeof body.data.proof === 'string' && body.data.proof.length > 0,
-      has_merkle_root: typeof body.data.merkle_root === 'string',
-      has_nullifier_hash: typeof body.data.nullifier_hash === 'string',
-    });
 
     const result = await verifyWithDevPortal(body.data);
     if (!result.ok) {

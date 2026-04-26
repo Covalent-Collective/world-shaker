@@ -2,6 +2,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { toast } from 'sonner';
 import VerifyPage from '../verify/page';
 
 // --- mocks ---
@@ -33,9 +34,10 @@ vi.mock('@/components/world/VerifiedHumanBadge', () => ({
 // points the page touches. Each test rewrites the `verify` mock to simulate
 // a different finalPayload outcome.
 const mockVerify = vi.fn();
+const mockIsInstalled = vi.fn(() => true);
 vi.mock('@worldcoin/minikit-js', () => ({
   MiniKit: {
-    isInstalled: () => true,
+    isInstalled: () => mockIsInstalled(),
     commandsAsync: {
       verify: (...args: unknown[]) => mockVerify(...args),
     },
@@ -56,6 +58,7 @@ const SUCCESS_PAYLOAD = {
 describe('VerifyPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsInstalled.mockReturnValue(true);
   });
 
   it('renders title, subtitle and CTA', () => {
@@ -81,7 +84,6 @@ describe('VerifyPage', () => {
   it('shows error toast on non-200 response from /api/verify', async () => {
     mockVerify.mockResolvedValue({ finalPayload: SUCCESS_PAYLOAD });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-    const { toast } = await import('sonner');
 
     render(<VerifyPage />);
     await userEvent.click(screen.getByText('verify.cta'));
@@ -97,7 +99,6 @@ describe('VerifyPage', () => {
       finalPayload: { status: 'error', error_code: 'user_rejected' },
     });
     vi.stubGlobal('fetch', vi.fn());
-    const { toast } = await import('sonner');
 
     render(<VerifyPage />);
     await userEvent.click(screen.getByText('verify.cta'));
@@ -105,5 +106,20 @@ describe('VerifyPage', () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
     });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('shows error toast when MiniKit is not installed (not in World App)', async () => {
+    mockIsInstalled.mockReturnValue(false);
+    vi.stubGlobal('fetch', vi.fn());
+
+    render(<VerifyPage />);
+    await userEvent.click(screen.getByText('verify.cta'));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('verify.error_toast');
+    });
+    expect(mockVerify).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 });
