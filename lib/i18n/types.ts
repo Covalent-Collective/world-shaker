@@ -52,4 +52,13 @@ export type MessageKey =
   | 'safety.report_reason.spam'
   | 'safety.report_reason.other'
   | 'safety.detail_placeholder'
-  | 'safety.hide_and_report';
+  | 'safety.hide_and_report'
+  | 'home.preparing.label'
+  | 'home.preparing.title'
+  | 'home.preparing.body'
+  | 'encounter.titlecard.label'
+  | 'encounter.titlecard.subtitle'
+  | 'encounter.header'
+  | 'encounter.scenelabel'
+  | 'encounter.fin'
+  | 'encounter.abandoned';

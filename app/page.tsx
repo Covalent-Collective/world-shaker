@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 import { verifyWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
-import HomeRecoveryProbe from '@/components/home/HomeRecoveryProbe';
+import AgentRevealCard from '@/components/home/AgentRevealCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -147,19 +147,7 @@ export default async function HomePage(): Promise<React.ReactElement> {
     );
   }
 
-  // Case 4: No conversation, no match → preparing first encounter + recovery probe
-  return (
-    <main className="min-h-dvh flex items-center justify-center p-6">
-      <div className="max-w-md text-center space-y-4">
-        <p className="text-text-3 text-xs tracking-widest uppercase font-semibold">World Shaker</p>
-        <h1 className="font-serif text-4xl leading-tight">
-          Preparing your first <span className="italic text-accent-warm">encounter.</span>
-        </h1>
-        <p className="text-text-2">
-          Your AI clone is warming up. Your first encounter will be ready soon.
-        </p>
-        <HomeRecoveryProbe agentId={agentId} />
-      </div>
-    </main>
-  );
+  // Case 4: No conversation, no match → preparing first encounter + recovery probe.
+  // AgentRevealCard wraps the recovery probe in the cinematic stage atmosphere.
+  return <AgentRevealCard agentId={agentId} />;
 }

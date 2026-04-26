@@ -13,3 +13,97 @@
     font-feature-settings: 'cv11', 'ss01';
   }
 }
+
+@layer utilities {
+  /* Filmic grain — fixed-position SVG fractal noise overlaid with subtle blend.
+     Pulses slowly so grain feels alive, not pasted on. */
+  .grain::before {
+    content: '';
+    position: fixed;
+    inset: -50%;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/></svg>");
+    background-repeat: repeat;
+    pointer-events: none;
+    mix-blend-mode: overlay;
+    opacity: 0.16;
+    z-index: 50;
+    animation: grain-shift 6s steps(8) infinite;
+  }
+
+  @keyframes grain-shift {
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    20% {
+      transform: translate(-3%, 2%);
+    }
+    40% {
+      transform: translate(2%, -3%);
+    }
+    60% {
+      transform: translate(-1%, -2%);
+    }
+    80% {
+      transform: translate(3%, 1%);
+    }
+  }
+
+  /* Vignette that hugs the viewport edges; deepens scene focus. */
+  .vignette::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 90% at 50% 45%, transparent 50%, rgba(0, 0, 0, 0.55) 100%);
+    pointer-events: none;
+  }
+
+  /* Two warm spot pools angled in from above-left and above-right.
+     Sized large so the falloff feels theatrical, not like a torch. */
+  .stage-spotlights {
+    background:
+      radial-gradient(46% 55% at 28% 18%, rgba(255, 217, 168, 0.22), transparent 70%),
+      radial-gradient(46% 55% at 72% 18%, rgba(255, 181, 123, 0.18), transparent 72%),
+      linear-gradient(180deg, #1a0f14 0%, #0a0a0f 38%, #14141c 70%, #1a1b26 100%);
+  }
+
+  /* Gold proscenium: ornamental top frame for the encounter stage. */
+  .proscenium {
+    background:
+      linear-gradient(180deg, rgba(201, 169, 97, 0.25), transparent 60%),
+      radial-gradient(50% 110% at 50% 0%, rgba(201, 169, 97, 0.18), transparent 70%);
+  }
+
+  /* Wood-grain table line — a single horizontal accent between agents. */
+  .table-line {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(201, 169, 97, 0.18) 18%,
+      rgba(201, 169, 97, 0.45) 50%,
+      rgba(201, 169, 97, 0.18) 82%,
+      transparent 100%
+    );
+    box-shadow: 0 1px 12px rgba(201, 169, 97, 0.12);
+  }
+
+  /* Aged paper for speech bubbles. Cream with a faint warm ink. */
+  .bubble-paper {
+    background: linear-gradient(180deg, #f4ece2 0%, #ece2d3 100%);
+    color: #2a2218;
+    box-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.08),
+      0 6px 18px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+
+  .bubble-paper-gold {
+    background: linear-gradient(180deg, #f4ece2 0%, #e8dcc4 100%);
+    color: #2a2218;
+    border: 1px solid rgba(201, 169, 97, 0.55);
+    box-shadow:
+      0 1px 0 rgba(201, 169, 97, 0.35),
+      0 6px 18px rgba(0, 0, 0, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+}
