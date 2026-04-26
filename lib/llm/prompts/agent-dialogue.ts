@@ -115,15 +115,18 @@ export function buildDialoguePrompt({
 
   let system: string;
   if (language === 'ko') {
-    system = `당신은 두 사람의 에이전트 간 대화를 진행하는 조율자입니다.
+    system = `당신은 두 사람의 첫 만남 — 캐주얼하지만 의미 있는 소개팅 — 을 시뮬레이션하는 조율자입니다. 두 사람은 서로를 모릅니다. 한 시간의 만남에서 각자의 가치관과 삶의 결을 알아보려 합니다.
 
 ## 참가자
 
-### ${nameA}의 인터뷰 답변
+### ${nameA} — 인터뷰 답변
 ${aInterview}
 
-### ${nameB}의 인터뷰 답변
+### ${nameB} — 인터뷰 답변
 ${bInterview}
+
+## 두 사람의 가치관 단서
+각 인터뷰 답변에서 드러나는 가치관 (예: 자율성, 성장, 따뜻함, 진실됨, 모험, 안정, 창조)을 추론해서 대화에 자연스럽게 녹이세요. 직접 "내 가치관은…"이라고 선언하지 말고, 일상의 선택·경험·감정을 통해 드러내세요.
 
 ## 현재 단계
 ${stageSteering}
@@ -131,22 +134,26 @@ ${stageSteering}
 ## 다음 발언자
 ${nextSpeaker}
 
-## 지침
-- 두 참가자는 각자의 인터뷰 답변에 드러난 진짜 목소리, 어휘, 관심사, 가치관, 구체적인 경험을 반영해야 합니다. 일반적인 인사말이나 날씨 잡담은 피하세요. 위 답변에서 보이는 구체적인 사람·장소·문장·표현을 자연스럽게 끌어쓰세요.
-- 응답은 반드시 한 사람의 발언만 포함해야 합니다.
-- 응답 형식: "${whose_turn === 'a' ? nameA : nameB}: [발언 내용]"
-- 자연스럽고 진정성 있게 대화하세요. 각 발언은 2-4문장이 적당합니다.
-- 조용한 보호자 톤을 유지하세요: 차분하고 진실되게.`;
+## 대화 지침
+- 두 사람은 진짜 사람으로서 행동합니다 (에이전트가 아닙니다). 인터뷰 답변에 등장한 구체적인 사람·장소·일화·문장을 자연스럽게 끌어쓰세요.
+- 소개팅이 어떻게 진행되는지 떠올려보세요: 가벼운 호기심에서 출발해 점차 더 깊은 가치관/삶의 방식으로 들어갑니다. 어색함도 진솔함도 자연스럽습니다.
+- 가치관이 비슷한 부분에서는 "어, 나도" 의 공감을, 차이가 보이는 부분에서는 부드럽지만 솔직한 호기심으로 탐색하세요. 동의를 강요하지 마세요.
+- 일반적 인사말, 날씨 잡담, "잘 부탁드려요" 같은 빈 표현은 피하세요.
+- 응답은 반드시 한 사람의 발언만, 2-4 문장으로. 응답 형식: "${whose_turn === 'a' ? nameA : nameB}: [발언]"
+- 톤: 차분하고 진솔하게. 과장·과잉 친절·낮간지러움은 없게.`;
   } else {
-    system = `You are a coordinator facilitating a conversation between two agents representing real people.
+    system = `You are simulating a first meeting between two people — casual but meaningful, the kind of intro date where each is trying to understand the other's values and way of being. They don't know each other yet. They have an hour, roughly.
 
 ## Participants
 
-### ${nameA}'s interview answers
+### ${nameA} — interview answers
 ${aInterview}
 
-### ${nameB}'s interview answers
+### ${nameB} — interview answers
 ${bInterview}
+
+## Reading their values
+Infer each person's values (e.g. autonomy, growth, warmth, honesty, adventure, stability, craft) from their interview answers and let those values surface naturally in the conversation — through specific choices, experiences, and feelings. Do NOT have either person announce "my value is…" — show, don't tell.
 
 ## Current Phase
 ${stageSteering}
@@ -154,12 +161,13 @@ ${stageSteering}
 ## Next Speaker
 ${nextSpeaker}
 
-## Guidelines
-- Both participants must reflect the real voice, vocabulary, interests, values, and concrete experiences shown in their interview answers above. Avoid generic greetings or weather talk. Pull specific people, places, phrases, and references from the answers naturally.
-- Your response must contain only one person's statement.
-- Format: "${whose_turn === 'a' ? nameA : nameB}: [statement]"
-- Speak naturally and authentically. Keep each turn to 2-4 sentences.
-- Maintain a quiet protector tone: calm and genuine.`;
+## Conversation guidelines
+- Both speak as real people (not agents). Pull concrete people, places, anecdotes, and phrases from their interview answers — verbatim where it lands.
+- Imagine how a real first meeting unfolds: light curiosity first, then gradually toward deeper values and life-shape. Awkwardness and candour are both fair game.
+- Where their values overlap, let them notice it ("oh, me too"). Where values differ, explore with gentle, honest curiosity rather than agreement-seeking.
+- Avoid generic greetings, weather small-talk, or hollow politeness ("nice to meet you" etc.).
+- One speaker per response, 2–4 sentences. Format: "${whose_turn === 'a' ? nameA : nameB}: [statement]"
+- Tone: calm and candid. No exaggeration, performative friendliness, or saccharine warmth.`;
   }
 
   // Role mapping is RELATIVE to whose_turn — see the file-level comment for

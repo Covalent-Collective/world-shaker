@@ -108,13 +108,18 @@ const en = {
   'interview.placeholder': 'Take your time — speak freely.',
   'interview.next': 'Next',
   'interview.complete': 'Done',
-  'interview.skeleton.q0_name': 'What name should we use for you in this encounter?',
-  'interview.skeleton.q1': 'What makes you laugh these days?',
-  'interview.skeleton.q2': 'What is the last thing that genuinely surprised you?',
-  'interview.skeleton.q3': 'Is there something you are quietly working through right now?',
-  'interview.skeleton.q4': 'How do you usually spend time alone?',
-  'interview.skeleton.q5': 'Tell me about a moment recently when someone made you grateful.',
-  'interview.skeleton.q6': 'What is one small thing you want to try in the next month?',
+  'interview.skeleton.q0_name': 'What should we call you in this encounter?',
+  'interview.skeleton.q1':
+    "What kind of moments make you feel most yourself? It's okay to be specific.",
+  'interview.skeleton.q2':
+    'What recently surprised you — about the world, about a person, or about yourself?',
+  'interview.skeleton.q3': "What's something you're quietly working through right now?",
+  'interview.skeleton.q4':
+    'How do you usually spend an evening on your own — and what does that say about what you value?',
+  'interview.skeleton.q5':
+    'Tell me about someone recently who shaped how you see things. What did they do?',
+  'interview.skeleton.q6':
+    "What's one small thing you want to try in the next month — and why does it matter to you?",
   // TODO(copy-review): proposed: 'You found each other' — reason: 'You matched each other' borrows dating-app gamification framing ('match' implies a game result); 'You found each other' is more human, less transactional
   'success.title': 'You matched each other',
   // TODO(copy-review): proposed: 'Open conversation' — reason: 'Start the conversation' is directional and imperative; 'Open conversation' is shorter, action-oriented, and avoids the instructional register
