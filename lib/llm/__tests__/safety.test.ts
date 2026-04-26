@@ -251,7 +251,7 @@ describe('detectHostileTone', () => {
     expect(result.reason).toBe('degraded');
   });
 
-  it('timeout (800ms abort) → flagged: true, reason: degraded', async () => {
+  it('timeout (5s abort) → flagged: true, reason: degraded', async () => {
     vi.useFakeTimers();
 
     // fetch never resolves; rejects on abort signal.
@@ -267,8 +267,9 @@ describe('detectHostileTone', () => {
     const resultPromise = detectHostileTone('some text');
 
     // Flush microtasks so loadBreakerState() resolves and callModeration()
-    // schedules its 800ms abort timer BEFORE we advance fake time.
-    await vi.advanceTimersByTimeAsync(900);
+    // schedules its abort timer BEFORE we advance fake time. Timer is
+    // FETCH_TIMEOUT_MS (5000ms) — advance past it.
+    await vi.advanceTimersByTimeAsync(5100);
 
     const result = await resultPromise;
 

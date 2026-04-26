@@ -9,7 +9,7 @@ import { getPostHogServer } from '@/lib/posthog/server';
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const MODERATION_MODEL = 'openai/omni-moderation-latest';
-const FETCH_TIMEOUT_MS = 800;
+const FETCH_TIMEOUT_MS = 5000;
 const BREAKER_WINDOW_MS = 60_000; // 60 seconds
 const BREAKER_THRESHOLD = 3; // failures before opening
 const BREAKER_CACHE_TTL_MS = 10_000; // 10s in-memory mirror of DB state
@@ -338,33 +338,76 @@ async function runModeration(text: string): Promise<FetchOutcome> {
 }
 
 // ---------------------------------------------------------------------------
+// degraded-result helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the result returned when the moderation provider fails.
+ *
+ * Default behaviour is fail-CLOSED — every conversation turn is rejected.
+ * That is the right posture once a real moderation endpoint is wired in
+ * (OpenAI's /v1/moderations, Anthropic's content safety, etc.). It is the
+ * WRONG posture today: the configured endpoint
+ * (`https://openrouter.ai/api/v1/moderations`) does not exist — OpenRouter
+ * is a chat-completions proxy and serves an HTML 404 page for /moderations
+ * — so every call returns `failure` and every conversation hangs at turn 0.
+ *
+ * To unblock end-to-end testing without permanently lowering safety we
+ * gate fail-OPEN behind an explicit env flag. When `MODERATION_FAIL_OPEN`
+ * is `1` / `true`, provider failures are downgraded to `clean`; otherwise
+ * the original fail-CLOSED behaviour is preserved.
+ *
+ * Production-readiness: BEFORE turning this off (i.e. before relying on
+ * the strict fail-CLOSED default), wire `runModeration` to a working
+ * provider and verify with a manual POST.
+ */
+function moderationFailOpen(): boolean {
+  const v = process.env.MODERATION_FAIL_OPEN;
+  return v === '1' || v === 'true';
+}
+
+function buildDegradedResult(
+  fnName: 'detectHostileTone' | 'detectNSFW',
+  kind: 'failure' | 'bug',
+): ModerationResult {
+  if (kind === 'bug') {
+    console.error(`safety: ${fnName} received bug-class error from provider`);
+    try {
+      const ph = getPostHogServer();
+      ph?.capture({
+        distinctId: 'system',
+        event: 'safety_provider_bug',
+        properties: { provider: PROVIDER, fn: fnName },
+      });
+    } catch {
+      // Non-fatal.
+    }
+  }
+  if (moderationFailOpen()) {
+    console.warn(
+      `safety: ${fnName} provider unavailable; fail-OPEN bypass active (MODERATION_FAIL_OPEN=1)`,
+    );
+    return { flagged: false, reason: 'clean' };
+  }
+  return { flagged: true, reason: 'degraded' };
+}
+
+// ---------------------------------------------------------------------------
 // detectHostileTone
 // ---------------------------------------------------------------------------
 
 /**
  * Calls the moderation endpoint and flags if harassment >= 0.5 or hate >= 0.5.
- * On provider failure (timeout, 5xx, 429, malformed response) returns
- * { flagged: true, reason: 'degraded' } (fail-CLOSED).
+ * On provider failure (timeout, 5xx, 429, malformed response) the default
+ * is fail-CLOSED ({ flagged: true, reason: 'degraded' }); set
+ * MODERATION_FAIL_OPEN=1 to downgrade provider failures to 'clean' while
+ * a real moderation provider is being wired in. See buildDegradedResult.
  */
 export async function detectHostileTone(text: string): Promise<ModerationResult> {
   const outcome = await runModeration(text);
 
   if (outcome.kind === 'failure' || outcome.kind === 'bug') {
-    if (outcome.kind === 'bug') {
-      console.error('safety: detectHostileTone received bug-class error from provider');
-      // PostHog event fired without a real worldUserId — use anonymous sentinel.
-      try {
-        const ph = getPostHogServer();
-        ph?.capture({
-          distinctId: 'system',
-          event: 'safety_provider_bug',
-          properties: { provider: PROVIDER, fn: 'detectHostileTone' },
-        });
-      } catch {
-        // Non-fatal.
-      }
-    }
-    return { flagged: true, reason: 'degraded' };
+    return buildDegradedResult('detectHostileTone', outcome.kind);
   }
 
   const cats = outcome.categories!;
@@ -385,26 +428,14 @@ export async function detectHostileTone(text: string): Promise<ModerationResult>
 /**
  * Calls the moderation endpoint and flags if sexual >= 0.3 or
  * sexual/minors >= 0.01 (zero-tolerance).
- * On provider failure, returns { flagged: true, reason: 'degraded' } (fail-CLOSED).
+ * On provider failure: fail-CLOSED by default; opt-in fail-OPEN via
+ * MODERATION_FAIL_OPEN=1. See buildDegradedResult for rationale.
  */
 export async function detectNSFW(text: string): Promise<ModerationResult> {
   const outcome = await runModeration(text);
 
   if (outcome.kind === 'failure' || outcome.kind === 'bug') {
-    if (outcome.kind === 'bug') {
-      console.error('safety: detectNSFW received bug-class error from provider');
-      try {
-        const ph = getPostHogServer();
-        ph?.capture({
-          distinctId: 'system',
-          event: 'safety_provider_bug',
-          properties: { provider: PROVIDER, fn: 'detectNSFW' },
-        });
-      } catch {
-        // Non-fatal.
-      }
-    }
-    return { flagged: true, reason: 'degraded' };
+    return buildDegradedResult('detectNSFW', outcome.kind);
   }
 
   const cats = outcome.categories!;
