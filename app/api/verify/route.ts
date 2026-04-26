@@ -7,12 +7,18 @@ import { signWorldUserJwt, SESSION_COOKIE, parseLanguagePref } from '@/lib/auth/
 
 export const runtime = 'nodejs';
 
-const Body = z.object({
-  proof: z.unknown(),
-  nullifier_hash: z.string().optional(),
-  merkle_root: z.string().optional(),
-  verification_level: z.string().optional(),
-});
+// IDKit returns IDKitResultV3 | IDKitResultV4 | IDKitResultSession with
+// protocol_version, nonce, action, responses[], environment. The full result
+// is forwarded to the Dev Portal verify endpoint untouched — proofs are bound
+// to the action and other fields they were generated against. Passthrough so
+// no fields are stripped before forwarding.
+const Body = z
+  .object({
+    protocol_version: z.string().optional(),
+    action: z.string().optional(),
+    responses: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
 
 /**
  * POST /api/verify

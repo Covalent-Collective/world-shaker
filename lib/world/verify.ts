@@ -60,6 +60,14 @@ export async function verifyWithDevPortal(
     return { ok: false, error: 'rp_id_missing' };
   }
   const url = `https://developer.world.org/api/v4/verify/${WORLD_RP_ID}`;
+  // The client passes the full IDKit result (V3 or V4): it already has
+  // protocol_version, nonce, action, responses[], environment. Forward as-is —
+  // proofs are bound to the action they were generated against, so we cannot
+  // safely override `action` server-side. We instead validate `data.action`
+  // against WORLD_ACTION on the response below.
+  if (!payload || typeof payload !== 'object' || !('responses' in payload)) {
+    return { ok: false, error: 'invalid_idkit_payload' };
+  }
   try {
     const res = await fetch(url, {
       method: 'POST',
