@@ -2,6 +2,7 @@ import { inngest } from '../client';
 import { getServiceClient } from '@/lib/supabase/service';
 import { generateAvatar } from '@/lib/avatar/generate';
 import { getDailyQuota } from '@/lib/quota/daily';
+import { captureServer } from '@/lib/posthog/server';
 
 /**
  * First-encounter pipeline.
@@ -159,6 +160,18 @@ export const firstEncounter = inngest.createFunction(
         language: 'ko' as const,
         is_first_encounter: true,
       },
+    });
+
+    await step.run('posthog-first-encounter-spawned', async () => {
+      await captureServer('first_encounter_spawned', {
+        worldUserId: user_id,
+        properties: {
+          agent_a_id,
+          agent_b_id,
+          pair_key,
+          candidate_user_id: candidate.candidate_user_id,
+        },
+      });
     });
 
     return {

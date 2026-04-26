@@ -5,6 +5,7 @@ import { streamChat, DEFAULT_CHAT_MODEL } from '@/lib/llm/openrouter';
 import { detectRepeatLoop, detectHostileTone, detectNSFW } from '@/lib/llm/safety';
 import { buildPersonaPrompt } from '@/lib/llm/prompts/persona';
 import { buildDialoguePrompt } from '@/lib/llm/prompts/agent-dialogue';
+import { captureServer } from '@/lib/posthog/server';
 import type {
   ExtractedFeatures,
   Lang,
@@ -139,6 +140,15 @@ export const liveConversation = inngest.createFunction(
           metadata: { reason: preflight.reason ?? 'unknown', surface, pair_key },
         });
       });
+      // Emit streaming_paused_cost_cap when the global cost cap or streaming_paused flag aborts.
+      if (preflight.reason === 'global_cap_exceeded' || preflight.reason === 'streaming_paused') {
+        await step.run('posthog-streaming-paused', async () => {
+          await captureServer('streaming_paused_cost_cap', {
+            worldUserId: user_id,
+            properties: { reason: preflight.reason, surface, pair_key },
+          });
+        });
+      }
       logger.info(`live-conversation: pre-flight aborted reason=${preflight.reason ?? 'unknown'}`);
       return { aborted: true, reason: preflight.reason ?? 'unknown' };
     }
@@ -185,6 +195,19 @@ export const liveConversation = inngest.createFunction(
       });
       if (error) throw new Error(`allocate_conversation_attempt failed: ${error.message}`);
       return data as string;
+    });
+
+    // Emit conversation_streaming_started once we have a confirmed conversation_id.
+    await step.run('posthog-streaming-started', async () => {
+      await captureServer('conversation_streaming_started', {
+        worldUserId: user_id,
+        properties: {
+          conversation_id,
+          surface,
+          pair_key,
+          is_first_encounter: is_first_encounter ?? false,
+        },
+      });
     });
 
     // ---- Step 3: load agents ----------------------------------------------
@@ -252,6 +275,18 @@ export const liveConversation = inngest.createFunction(
             reason: `cost_cap_exceeded:${turnPreflight.reason ?? 'unknown'}`,
             turn_index,
           },
+        });
+        await step.run(`posthog-streaming-paused-turn-${turn_index}`, async () => {
+          await captureServer('streaming_paused_cost_cap', {
+            worldUserId: user_id,
+            properties: {
+              conversation_id,
+              reason: turnPreflight.reason,
+              turn_index,
+              surface,
+              pair_key,
+            },
+          });
         });
         logger.warn(
           `live-conversation: budget cap exceeded at turn=${turn_index} reason=${turnPreflight.reason ?? 'unknown'}`,
@@ -337,6 +372,20 @@ export const liveConversation = inngest.createFunction(
             turn_speaker === 'a' ? (personaA.name ?? 'Agent A') : (personaB.name ?? 'Agent B'),
           text: turn.text,
         });
+        // Emit llm_cost per successfully committed turn.
+        await step.run(`posthog-llm-cost-turn-${turn_index}`, async () => {
+          await captureServer('llm_cost', {
+            worldUserId: user_id,
+            properties: {
+              conversation_id,
+              turn_index,
+              model: turn.usage.model,
+              input_tokens: turn.usage.input_tokens,
+              output_tokens: turn.usage.output_tokens,
+              cost_usd: turn.usage.cost_usd,
+            },
+          });
+        });
       } else {
         // Duplicate retry — still keep transcript in sync for subsequent turns.
         transcript.push({
@@ -378,6 +427,19 @@ export const liveConversation = inngest.createFunction(
     await step.sendEvent('emit-conversation-completed', {
       name: CONVERSATION_COMPLETED_EVENT,
       data: { conversation_id, is_first_encounter: is_first_encounter ?? false },
+    });
+
+    await step.run('posthog-conversation-completed', async () => {
+      await captureServer('conversation_completed', {
+        worldUserId: user_id,
+        properties: {
+          conversation_id,
+          surface,
+          pair_key,
+          turns: maxTurns,
+          is_first_encounter: is_first_encounter ?? false,
+        },
+      });
     });
 
     return { conversation_id, status: 'completed', turns: maxTurns };

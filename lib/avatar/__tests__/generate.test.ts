@@ -9,7 +9,10 @@ import { createHash } from 'crypto';
 // ---------------------------------------------------------------------------
 
 const mockUpdate = vi.fn();
-const mockEq = vi.fn();
+const mockUpdateEq = vi.fn();
+const mockSelectSingle = vi.fn();
+const mockSelectEq = vi.fn();
+const mockSelect = vi.fn();
 const mockFrom = vi.fn();
 
 vi.mock('@/lib/supabase/service', () => ({
@@ -22,18 +25,45 @@ vi.mock('@/lib/supabase/service', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Build the service client mock chain: from().update().eq() → { error: null } */
-function setupDbSuccess(): void {
-  mockEq.mockResolvedValue({ error: null });
-  mockUpdate.mockReturnValue({ eq: mockEq });
-  mockFrom.mockReturnValue({ update: mockUpdate });
+/**
+ * Build the full service client mock chain supporting both:
+ *   from('agents').select(...).eq(...).single()  → selectResult
+ *   from('agents').update(...).eq(...)           → { error: null }
+ *
+ * selectResult defaults to no existing avatar (data: null, error: null),
+ * which means the one-shot guard passes through and generation proceeds.
+ */
+function setupDbSuccess(
+  selectResult: {
+    data: Record<string, unknown> | null;
+    error: null | { code?: string; message: string };
+  } = { data: null, error: null },
+): void {
+  // SELECT chain: from('agents').select(...).eq(...).single()
+  mockSelectSingle.mockResolvedValue(selectResult);
+  mockSelectEq.mockReturnValue({ single: mockSelectSingle });
+  mockSelect.mockReturnValue({ eq: mockSelectEq });
+
+  // UPDATE chain: from('agents').update(...).eq(...)
+  mockUpdateEq.mockResolvedValue({ error: null });
+  mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+  // from() returns an object exposing both select and update
+  mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate });
 }
 
-/** Build the service client mock chain that returns a DB error. */
+/** Build the service client mock chain that returns a DB update error. */
 function setupDbError(message: string): void {
-  mockEq.mockResolvedValue({ error: { message } });
-  mockUpdate.mockReturnValue({ eq: mockEq });
-  mockFrom.mockReturnValue({ update: mockUpdate });
+  // SELECT returns no existing avatar (guard passes through)
+  mockSelectSingle.mockResolvedValue({ data: null, error: null });
+  mockSelectEq.mockReturnValue({ single: mockSelectSingle });
+  mockSelect.mockReturnValue({ eq: mockSelectEq });
+
+  // UPDATE returns an error
+  mockUpdateEq.mockResolvedValue({ error: { message } });
+  mockUpdate.mockReturnValue({ eq: mockUpdateEq });
+
+  mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate });
 }
 
 /** Compute the expected placeholder hash inline (independent of prod code path). */
@@ -112,7 +142,7 @@ describe('generateAvatar — placeholder mode (no OPENROUTER_IMAGE_MODEL)', () =
         avatar_generated_at: expect.any(String),
       }),
     );
-    expect(mockEq).toHaveBeenCalledWith('id', 'agent-db-test');
+    expect(mockUpdateEq).toHaveBeenCalledWith('id', 'agent-db-test');
   });
 
   it('throws when the DB update returns an error', async () => {
@@ -122,6 +152,74 @@ describe('generateAvatar — placeholder mode (no OPENROUTER_IMAGE_MODEL)', () =
     await expect(
       generateAvatar({ agent_id: 'agent-err', extracted_features: features }),
     ).rejects.toThrow('avatar_db_update_error');
+  });
+});
+
+describe('generateAvatar — one-shot immutability guard (US-501)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.OPENROUTER_IMAGE_MODEL;
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  afterEach(() => {
+    delete process.env.OPENROUTER_IMAGE_MODEL;
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  it('returns existing URL on second call without writing to DB or calling image API', async () => {
+    const features = { mood: 'calm', language: 'ko' };
+    const existingUrl = expectedPlaceholderUrl(features);
+    const existingTimestamp = '2026-04-26T00:00:00.000Z';
+
+    // Simulate agent already has avatar_generated_at set
+    setupDbSuccess({
+      data: { avatar_url: existingUrl, avatar_generated_at: existingTimestamp },
+      error: null,
+    });
+
+    const result = await generateAvatar({ agent_id: 'agent-repeat', extracted_features: features });
+
+    expect(result.url).toBe(existingUrl);
+    expect(result.placeholder).toBe(true);
+
+    // Must NOT have called update — no second write
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateEq).not.toHaveBeenCalled();
+  });
+
+  it('returns placeholder=false for existing real image URL on second call', async () => {
+    const existingUrl = 'https://cdn.openrouter.ai/images/existing-avatar.png';
+    const existingTimestamp = '2026-04-26T00:00:00.000Z';
+
+    setupDbSuccess({
+      data: { avatar_url: existingUrl, avatar_generated_at: existingTimestamp },
+      error: null,
+    });
+
+    const result = await generateAvatar({
+      agent_id: 'agent-real-img',
+      extracted_features: { style: 'cyberpunk' },
+    });
+
+    expect(result.url).toBe(existingUrl);
+    expect(result.placeholder).toBe(false);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('throws avatar_db_select_error when SELECT fails with unexpected error', async () => {
+    // Non-PGRST116 error from the SELECT should surface
+    mockSelectSingle.mockResolvedValue({
+      data: null,
+      error: { code: 'PGRST500', message: 'connection timeout' },
+    });
+    mockSelectEq.mockReturnValue({ single: mockSelectSingle });
+    mockSelect.mockReturnValue({ eq: mockSelectEq });
+    mockFrom.mockReturnValue({ select: mockSelect, update: mockUpdate });
+
+    await expect(
+      generateAvatar({ agent_id: 'agent-select-err', extracted_features: { trait: 'bold' } }),
+    ).rejects.toThrow('avatar_db_select_error');
   });
 });
 
@@ -183,7 +281,7 @@ describe('generateAvatar — real image mode (OPENROUTER_IMAGE_MODEL set)', () =
     expect(mockUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ avatar_url: FAKE_IMAGE_URL }),
     );
-    expect(mockEq).toHaveBeenCalledWith('id', 'agent-write');
+    expect(mockUpdateEq).toHaveBeenCalledWith('id', 'agent-write');
   });
 
   it('throws when OpenRouter image API returns a non-ok status', async () => {

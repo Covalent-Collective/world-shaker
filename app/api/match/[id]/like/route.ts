@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { verifyWorldUserJwt, SESSION_COOKIE } from '@/lib/auth/jwt';
 import { getServiceClient } from '@/lib/supabase/service';
 import { inngest } from '@/lib/inngest/client';
+import { captureServer } from '@/lib/posthog/server';
 
 export const runtime = 'nodejs';
 
@@ -86,6 +87,12 @@ export async function POST(
     return NextResponse.json({ status: 'skipped', mutual: false, match_id: matchId });
   }
 
+  // Emit like_sent on accept decision.
+  void captureServer('like_sent', {
+    worldUserId: world_user_id,
+    properties: { match_id: matchId, candidate_user_id: updatedMatch.candidate_user_id },
+  });
+
   // ── Accept: check for reciprocal accepted match ───────────────────────────
   const { data: reciprocal } = await supabase
     .from('matches')
@@ -126,6 +133,15 @@ export async function POST(
       console.error('[match/like] outcome_events insert failed (mutual):', error);
     }
   }
+
+  // Emit mutual_match PostHog event for both sides.
+  void captureServer('mutual_match', {
+    worldUserId: world_user_id,
+    properties: {
+      match_id: matchId,
+      candidate_user_id: updatedMatch.candidate_user_id,
+    },
+  });
 
   // Emit event for downstream jobs (chat creation, push notification, etc.)
   await inngest.send({
