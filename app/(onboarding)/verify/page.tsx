@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { IDKitRequestWidget, orbLegacy } from '@worldcoin/idkit';
-import type { IDKitErrorCodes, IDKitResult } from '@worldcoin/idkit';
+import { MiniKit, VerificationLevel } from '@worldcoin/minikit-js';
+import type { ISuccessResult } from '@worldcoin/minikit-js';
 import { toast } from 'sonner';
 import { useT } from '@/lib/i18n/useT';
 import { posthog } from '@/lib/posthog/client';
@@ -12,15 +12,37 @@ import VerifiedHumanBadge from '@/components/world/VerifiedHumanBadge';
 export default function VerifyPage(): React.ReactElement {
   const t = useT();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [verified, setVerified] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const handleSuccess = async (result: IDKitResult): Promise<void> => {
+  const handleVerify = async (): Promise<void> => {
+    setBusy(true);
     try {
+      if (!MiniKit.isInstalled()) {
+        posthog.capture('verify_error', { reason: 'not_in_world_app' });
+        toast.error(t('verify.error_toast'));
+        return;
+      }
+
+      const action = process.env.NEXT_PUBLIC_WORLD_ACTION as string;
+      const { finalPayload } = await MiniKit.commandsAsync.verify({
+        action,
+        verification_level: VerificationLevel.Orb,
+      });
+
+      if (finalPayload.status === 'error') {
+        posthog.capture('verify_error', {
+          reason: 'minikit_error',
+          code: finalPayload.error_code,
+        });
+        toast.error(t('verify.error_toast'));
+        return;
+      }
+
       const res = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result),
+        body: JSON.stringify(finalPayload as ISuccessResult),
       });
 
       if (res.ok) {
@@ -34,12 +56,9 @@ export default function VerifyPage(): React.ReactElement {
     } catch {
       posthog.capture('verify_error', { reason: 'network' });
       toast.error(t('verify.error_toast'));
+    } finally {
+      setBusy(false);
     }
-  };
-
-  const handleError = (errorCode: IDKitErrorCodes): void => {
-    posthog.capture('verify_error', { reason: 'idkit', code: errorCode });
-    toast.error(t('verify.error_toast'));
   };
 
   return (
@@ -54,27 +73,11 @@ export default function VerifyPage(): React.ReactElement {
           <VerifiedHumanBadge variant={verified ? 'full' : 'compact'} />
         </div>
 
-        {/* IDKitRequestWidget renders the QR/modal; open state is controlled externally */}
-        <IDKitRequestWidget
-          app_id={process.env.NEXT_PUBLIC_WORLD_APP_ID as `app_${string}`}
-          action={process.env.NEXT_PUBLIC_WORLD_ACTION as string}
-          preset={orbLegacy()}
-          allow_legacy_proofs={true}
-          // rp_context is populated at runtime by the World App bridge;
-          // cast needed because the type requires server-signed values we
-          // cannot generate client-side at build time.
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          rp_context={undefined as any}
-          open={open}
-          onOpenChange={setOpen}
-          onSuccess={handleSuccess}
-          onError={handleError}
-        />
-
         <button
           type="button"
-          onClick={() => setOpen(true)}
-          className="w-full rounded-xl bg-foreground text-background py-3 px-6 text-sm font-semibold transition-opacity hover:opacity-80 active:opacity-60"
+          onClick={handleVerify}
+          disabled={busy}
+          className="w-full rounded-xl bg-foreground text-background py-3 px-6 text-sm font-semibold transition-opacity hover:opacity-80 active:opacity-60 disabled:opacity-50"
         >
           {t('verify.cta')}
         </button>

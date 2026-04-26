@@ -24,8 +24,10 @@ export function Providers({ children }: { children: ReactNode }) {
     initPostHog();
   }, []);
 
+  const appId = process.env.NEXT_PUBLIC_WORLD_APP_ID as `app_${string}`;
+
   return (
-    <MiniKitProvider>
+    <MiniKitProvider props={{ appId }}>
       <QueryClientProvider client={queryClient}>
         {children}
         {process.env.NODE_ENV === 'development' ? (

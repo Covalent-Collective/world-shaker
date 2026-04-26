@@ -41,15 +41,16 @@ export async function generateRpContext({ signal }: { signal?: string }) {
 }
 
 /**
- * Verify an IDKit proof payload against the Developer Portal v4 endpoint.
+ * Verify a MiniKit `verify` finalPayload (ISuccessResult) against Dev Portal
+ * v2. The MiniApp context delivers proofs through MiniKit, not IDKit web flow,
+ * so v2 (flat body, app_id in path) is the matching endpoint shape.
  *
- * Per Codex review HIGH-2 we explicitly enforce:
+ * Per Codex review HIGH-2 we still enforce:
  *   - data.action equals our configured WORLD_ACTION
- *   - data.environment matches WORLD_ENVIRONMENT
- *   - At least one result has identifier='orb' AND success=true
+ *   - data.verification_level === 'orb' (REQUIRED_VERIFICATION_LEVEL)
  *
- * Without these checks, any proof from any other action / environment / device
- * level would be accepted, breaking the orb-only one-human-one-account gate.
+ * Without these checks, any proof from any other action / device level would
+ * be accepted, breaking the orb-only one-human-one-account gate.
  */
 export async function verifyWithDevPortal(
   payload: unknown,
@@ -59,52 +60,71 @@ export async function verifyWithDevPortal(
   if (!WORLD_RP_ID) {
     return { ok: false, error: 'rp_id_missing' };
   }
+  // Dev Portal v4 verify endpoint — accepts v3 protocol bodies for legacy
+  // proofs. MiniKit v1 `verify` finalPayload is flat (ISuccessResult);
+  // wrap into the v3 protocol body shape for forwarding.
   const url = `https://developer.world.org/api/v4/verify/${WORLD_RP_ID}`;
-  // The client passes the full IDKit result (V3 or V4): it already has
-  // protocol_version, nonce, action, responses[], environment. Forward as-is —
-  // proofs are bound to the action they were generated against, so we cannot
-  // safely override `action` server-side. We instead validate `data.action`
-  // against WORLD_ACTION on the response below.
-  if (!payload || typeof payload !== 'object' || !('responses' in payload)) {
+  if (!payload || typeof payload !== 'object') {
+    return { ok: false, error: 'invalid_payload' };
+  }
+  const p = payload as {
+    proof?: string;
+    merkle_root?: string;
+    nullifier_hash?: string;
+    verification_level?: string;
+  };
+  if (!p.proof || !p.merkle_root || !p.nullifier_hash) {
     return { ok: false, error: 'invalid_idkit_payload' };
   }
+  const body = {
+    protocol_version: '3.0',
+    nonce: crypto.randomUUID(),
+    action: WORLD_ACTION,
+    environment: WORLD_ENVIRONMENT,
+    responses: [
+      {
+        identifier: p.verification_level === 'orb' ? 'orb' : 'device',
+        proof: p.proof,
+        merkle_root: p.merkle_root,
+        nullifier: p.nullifier_hash,
+      },
+    ],
+  };
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const text = await res.text();
       return { ok: false, error: `dev_portal_${res.status}_${text.slice(0, 100)}` };
     }
+    // v2 success response is flat: { success, action, nullifier_hash,
+    // verification_level, created_at }.
     const data = (await res.json()) as {
       success?: boolean;
       action?: string;
-      environment?: string;
-      nullifier?: string;
-      results?: Array<{ identifier?: string; success?: boolean; nullifier?: string }>;
+      nullifier_hash?: string;
+      verification_level?: string;
     };
 
-    if (!data.success || typeof data.nullifier !== 'string') {
+    if (!data.success || typeof data.nullifier_hash !== 'string') {
       return { ok: false, error: 'dev_portal_rejected' };
     }
     if (data.action !== WORLD_ACTION) {
       return { ok: false, error: `action_mismatch_${data.action ?? 'missing'}` };
     }
-    if (data.environment !== WORLD_ENVIRONMENT) {
-      return { ok: false, error: `environment_mismatch_${data.environment ?? 'missing'}` };
-    }
-    const orbOk = data.results?.some(
-      (r) => r.success === true && r.identifier === REQUIRED_VERIFICATION_LEVEL,
-    );
-    if (!orbOk) {
-      return { ok: false, error: 'orb_credential_required' };
+    if (data.verification_level !== REQUIRED_VERIFICATION_LEVEL) {
+      return {
+        ok: false,
+        error: `orb_credential_required_${data.verification_level ?? 'missing'}`,
+      };
     }
 
     return {
       ok: true,
-      nullifier: data.nullifier,
+      nullifier: data.nullifier_hash,
       verification_level: 'orb',
     };
   } catch (err) {
